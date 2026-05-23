@@ -1,0 +1,2 @@
+sample_id,fastq_1,fastq_2,species_id,expected_genome_size_bp
+demo,test_data/demo_R1.fastq.gz,test_data/demo_R2.fastq.gz,Bostrychus_sinensis,1000000000

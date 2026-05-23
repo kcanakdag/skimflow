@@ -1,0 +1,48 @@
+# RESPECT + Gurobi container for the genome-skim pipeline.
+#
+# RESPECT (Sayyari et al. 2022) lives on PyPI, not Bioconda. Its runtime
+# dependencies are: Python ≥3.8, Jellyfish k-mer counter on PATH, and a
+# linear-programming solver (Gurobi, via the `gurobipy` PyPI package).
+# The Gurobi licence is NOT baked in — it's mounted at runtime so the
+# image is distributable and the licence stays per-user.
+#
+# Build (local, podman):
+#   podman build -t local/respect:0.2 -f containers/respect/Containerfile containers/respect
+# Build (apptainer, e.g. on GWDG):
+#   apptainer build respect_0.2.sif containers/respect/respect.def
+#
+# Run-time licence mount:
+#   - Get a free academic Gurobi WLS licence at https://www.gurobi.com/academia/
+#   - Save the credentials to ~/gurobi.lic on the host.
+#   - The Nextflow profiles auto-bind it to /opt/gurobi/gurobi.lic.
+
+FROM docker.io/python:3.8-slim
+
+LABEL org.opencontainers.image.source="https://github.com/shahab-sarmashghi/RESPECT"
+LABEL maintainer="skimflow pipeline"
+
+# Jellyfish is RESPECT's k-mer counter (called via `jellyfish count` / `jellyfish dump`).
+# build-essential covers C/C++ deps gurobipy may compile against during pip install.
+# git is needed to install RESPECT from its GitHub source (no PyPI release —
+# the `respect` package on PyPI is a different, unrelated tool).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        jellyfish \
+        seqtk \
+        build-essential \
+        git \
+        procps \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+        git+https://github.com/shahab-sarmashghi/RESPECT.git \
+        gurobipy
+
+# Gurobi looks here automatically; can also be overridden by binding a
+# licence to a different path and exporting GRB_LICENSE_FILE in the
+# Nextflow process.
+ENV GRB_LICENSE_FILE=/opt/gurobi/gurobi.lic
+
+WORKDIR /work
+
+CMD ["respect", "--help"]
