@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Subsample a real public paired-end FASTQ pair from ENA into test_data/.
-# Default accession: DRR148567 — Bostrychus sinensis (goby) low-cov WGS, ~214k pairs total.
+# Default accession: DRR148567 - Bostrychus sinensis (goby) low-cov WGS, ~214k pairs total.
 # We take the first N pairs to keep the smoke test fast (~few MB on disk).
 
 set -euo pipefail

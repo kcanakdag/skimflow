@@ -1,5 +1,5 @@
-skimflow — pipeline overview
-============================
+skimflow: pipeline overview
+===========================
 
 Input:  paired-end (or single-end) Illumina genome-skim reads
 Output: trimmed reads, genome-size + coverage estimate, de novo assembly,
@@ -40,12 +40,12 @@ Steps and tools
 
 2. GENOME_SIZE               modules/genome_size.nf
    Tool:      RESPECT (Sayyari et al. 2022)
-   Container: local/respect:0.2  (custom — built from
+   Container: local/respect:0.2  (custom, built from
               containers/respect/Containerfile, see below)
    Purpose:   skim-data-specific estimator that produces both
               genome size (bp) AND sequencing coverage (×) from the
               raw k-mer profile, with repeat correction. Coverage is
-              the go/no-go signal — if it's too low, abort before
+              the go/no-go signal; if it's too low, abort before
               spending compute on assembly/markers.
    Output:    estimated-parameters.txt (RESPECT native),
               <id>.genome_size.txt, <id>.coverage.txt,
@@ -65,7 +65,7 @@ Steps and tools
    Subworkflow: MITO_DB -> MITOGENOME
    Tool:      GetOrganelle
    Container: quay.io/biocontainers/getorganelle:1.7.7.1--pyhdfd78af_0
-   Note:      errorStrategy 'ignore' — fails gracefully at low coverage.
+   Note:      errorStrategy 'ignore' so it fails gracefully at low coverage.
 
 5. MARKER_EXTRACTION         modules/markers.nf
    Subworkflow: BUSCO_DB -> MARKERS
@@ -124,5 +124,5 @@ Helper scripts
                                Bostrychus sinensis, 50k pairs) into test_data/
 
   ~/bin/gnu-shim/date          Symlink to /usr/bin/gnudate, prepended to PATH
-                               in ~/.bashrc — works around uutils-coreutils
+                               in ~/.bashrc; works around uutils-coreutils
                                on Ubuntu 25 breaking Nextflow's nxf_date.

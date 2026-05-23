@@ -3,7 +3,7 @@
 # RESPECT (Sayyari et al. 2022) lives on PyPI, not Bioconda. Its runtime
 # dependencies are: Python ≥3.8, Jellyfish k-mer counter on PATH, and a
 # linear-programming solver (Gurobi, via the `gurobipy` PyPI package).
-# The Gurobi licence is NOT baked in — it's mounted at runtime so the
+# The Gurobi licence is NOT baked in - it's mounted at runtime so the
 # image is distributable and the licence stays per-user.
 #
 # Build (local, podman):
@@ -23,7 +23,7 @@ LABEL maintainer="skimflow pipeline"
 
 # Jellyfish is RESPECT's k-mer counter (called via `jellyfish count` / `jellyfish dump`).
 # build-essential covers C/C++ deps gurobipy may compile against during pip install.
-# git is needed to install RESPECT from its GitHub source (no PyPI release —
+# git is needed to install RESPECT from its GitHub source (no PyPI release -
 # the `respect` package on PyPI is a different, unrelated tool).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

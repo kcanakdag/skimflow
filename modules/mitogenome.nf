@@ -2,7 +2,7 @@
 //
 // GetOrganelle ships a per-organelle "label" database (seed sequences + HMM
 // profiles). It is downloaded on first use into ~/.GetOrganelle, which is
-// ephemeral inside a container — so we materialise the DB as a Nextflow
+// ephemeral inside a container - so we materialise the DB as a Nextflow
 // channel: MITO_DB downloads it once into a directory that downstream
 // MITOGENOME calls mount as input. Set params.organelle_db to skip the
 // download (point at an existing GetOrganelle library directory).
@@ -39,7 +39,7 @@ process MITOGENOME {
     time '4h'
 
     // GetOrganelle returns non-zero when it cannot finish the assembly
-    // (e.g. too few mitochondrial reads). For a smoke test this is fine —
+    // (e.g. too few mitochondrial reads). For a smoke test this is fine -
     // we capture the log and continue the pipeline.
     errorStrategy 'ignore'
 

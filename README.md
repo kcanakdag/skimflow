@@ -6,12 +6,12 @@ Nextflow pipeline that turns Illumina genome skims into assemblies, mitogenomes,
 
 From paired-end (or single-end) Illumina skim reads, skimflow produces:
 
-- **Trimmed reads** — fastp
-- **Genome size + coverage estimate** — RESPECT (the "is this data good enough?" gate)
-- **De novo assembly** — SPAdes
-- **Mitogenome** — GetOrganelle
-- **BUSCO marker scores** — BUSCO against the chosen lineage
-- **One-page MultiQC HTML report** — everything above, summarised
+- **Trimmed reads** with fastp
+- **Genome size + coverage estimate** with RESPECT (the "is this data good enough?" gate)
+- **De novo assembly** with SPAdes
+- **Mitogenome** with GetOrganelle
+- **BUSCO marker scores** against the chosen lineage
+- **One-page MultiQC HTML report** that summarises everything above
 
 ## Quick start
 
@@ -33,7 +33,14 @@ Other engines: `-profile test,docker` or `-profile test,apptainer`.
 
 ### GWDG HPC (Göttingen)
 
-One-liner — clones the repo, builds the container inside a compute job, allocates a workspace, submits to SLURM:
+SSH in first. SCC users (default partition `scc-cpu`) go to Emmy Phase 3:
+
+```bash
+ssh u<youruser>@glogin-p3.hpc.gwdg.de
+# NHR users (standard96 / standard96s): ssh u<youruser>@glogin.hpc.gwdg.de
+```
+
+One-liner that clones the repo, builds the container inside a compute job, allocates a workspace, and submits to SLURM:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kcanakdag/skimflow/main/bootstrap_gwdg.sh \
@@ -76,7 +83,7 @@ results/
 | Step | Tool |
 | --- | --- |
 | Read QC | fastp |
-| Genome size + coverage | RESPECT (Sayyari et al. 2022) — needs a Gurobi licence |
+| Genome size + coverage | RESPECT (Sayyari et al. 2022); needs a Gurobi licence |
 | Assembly | SPAdes |
 | Mitogenome | GetOrganelle |
 | Markers | BUSCO |
@@ -86,7 +93,7 @@ All steps run in containers (Podman / Docker / Apptainer). No conda required at 
 
 ## License
 
-MIT — see `LICENSE` if added.
+MIT. See `LICENSE` if added.
 
 ## Citation
 

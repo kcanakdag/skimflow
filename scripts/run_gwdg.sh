@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-shot launcher for the genome-skim pipeline on GWDG HPC (Göttingen).
-# Uses Apptainer (the only container runtime on the cluster). Idempotent —
+# Uses Apptainer (the only container runtime on the cluster). Idempotent -
 # safe to re-run; existing workspace and .sif are reused.
 #
 # What it does:
@@ -22,7 +22,8 @@
 #   -p, --partition NAME       SLURM partition. Default: scc-cpu
 #                              (NHR users: standard96 / standard96s)
 #   -f, --filesystem NAME      Workspace filesystem. Default: ceph-ssd
-#                              (use ceph-hdd for >90 day runs)
+#                              (use ceph-hdd if you need >90 days total -
+#                              ceph-ssd hard caps at 30d × 2 extensions = 90d)
 #   -w, --workspace-name NAME  Workspace name. Default: genome-skim
 #   -d, --workspace-days N     Initial allocation (days). Default: 30
 #   -a, --account ID           Slurm --account=<id>. Usually unnecessary on
@@ -77,20 +78,22 @@ done
 if ! type module >/dev/null 2>&1; then
     [[ -f /etc/profile.d/modules.sh ]] && source /etc/profile.d/modules.sh
 fi
-type module >/dev/null 2>&1 || die "'module' is not available — are you on a GWDG login/compute node?"
+type module >/dev/null 2>&1 || die "'module' is not available - are you on a GWDG login/compute node?"
 
 log "loading modules"
-# openjdk 17 — Nextflow ≥24.x needs Java 17. Bare `module load openjdk` may
-# silently pick Java 11; pin to a 17.x version and fall back if absent.
-module load openjdk/17.0.11_9 >/dev/null 2>&1 \
-    || module load openjdk/17.0.8.1_1 >/dev/null 2>&1 \
+# openjdk 17 - Nextflow ≥24.x needs Java 17. We don't pin a patch version
+# because GWDG bumps them and an exact pin breaks silently; Lmod resolves
+# `openjdk/17` to the latest 17.x. Fall through to bare `openjdk` as a
+# last resort and check the version after.
+module load openjdk/17 >/dev/null 2>&1 \
     || module load openjdk >/dev/null 2>&1 \
-    || die "no openjdk module available"
+    || die "no openjdk module available (run 'module spider openjdk' on a login node)"
 module load apptainer >/dev/null 2>&1 || die "failed to load apptainer module"
 
-# Nextflow: prefer the cluster module, fall back to ~/bin install.
-if ! module load nextflow/24.10.0 >/dev/null 2>&1 \
-    && ! module load nextflow >/dev/null 2>&1; then
+# Nextflow: GWDG doesn't publish a documented `nextflow` module (no entry
+# in the software stacks docs as of 2026-05). We probe for one anyway in
+# case it shows up later, then fall through to the ~/bin curl install.
+if ! module load nextflow >/dev/null 2>&1; then
     mkdir -p "$HOME/bin"
     export PATH="$HOME/bin:$PATH"
     if ! command -v nextflow >/dev/null 2>&1; then
@@ -133,7 +136,7 @@ if [[ ! -f "$RESPECT_SIF" ]]; then
              --cpus-per-task=4 --mem=8G \
              bash -c "$(declare -f build_respect); build_respect"
     else
-        log "building RESPECT image (NHR — direct build on login node OK)"
+        log "building RESPECT image (NHR - direct build on login node OK)"
         build_respect
     fi
 else
@@ -159,5 +162,7 @@ nextflow run . \
 
 echo
 log "done."
-log "archive results:  rsync -av results/ \"\$PROJECT/genome-skim-results/\""
+# Persistent project storage on GWDG resolves through ~/.project/<projectid>/
+# rather than a guaranteed $PROJECT env var (see GWDG storage map docs).
+log "archive results:  rsync -av results/ ~/.project/<projectid>/genome-skim-results/"
 log "free workspace:   ws_release $WS_NAME"
