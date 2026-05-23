@@ -40,18 +40,31 @@ ssh u<youruser>@glogin-p3.hpc.gwdg.de
 # NHR users (standard96 / standard96s): ssh u<youruser>@glogin.hpc.gwdg.de
 ```
 
-One-liner that clones the repo, builds the container inside a compute job, allocates a workspace, and submits to SLURM:
+One-liner that clones the repo, builds the container inside a compute job, allocates a workspace, and submits to SLURM. Two input styles:
+
+**Single sample (no CSV needed):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kcanakdag/skimflow/main/bootstrap_gwdg.sh \
+    | bash -s -- --r1 /path/to/sample_R1.fastq.gz --r2 /path/to/sample_R2.fastq.gz
+```
+
+`sample_id` is derived from the R1 filename (e.g. `Pmisa_R1.fastq.gz` becomes `Pmisa`); override with `--sample-id`. Drop `--r2` for single-end.
+
+**Multi-sample with a CSV:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kcanakdag/skimflow/main/bootstrap_gwdg.sh \
     | bash -s -- --input my_samplesheet.csv
 ```
 
-Run `./scripts/run_gwdg.sh --help` from inside a clone to see all flags (`--partition`, `--filesystem`, `--gurobi-lic`, …).
+Run `./scripts/run_gwdg.sh --help` from inside a clone to see all flags (`--partition`, `--filesystem`, `--gurobi-lic`, `--expected-size`, `--species`, ...).
 
-## Samplesheet
+## Input options
 
-A CSV with one row per sample:
+For a single sample, point at the FASTQs directly with `--r1` / `--r2` (the GWDG quick-start above shows this). No samplesheet required.
+
+For multiple samples, use a CSV with one row per sample:
 
 ```
 sample_id,fastq_1,fastq_2,species_id,expected_genome_size_bp

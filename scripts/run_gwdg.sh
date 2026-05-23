@@ -16,8 +16,17 @@
 # Usage:
 #   ./scripts/run_gwdg.sh [options] [-- extra nextflow args]
 #
-# Options:
-#   -i, --input PATH           Samplesheet CSV. Default: assets/samplesheet_test.csv
+# Input options (pick ONE):
+#   --r1 PATH                  R1 FASTQ for a single-sample run.
+#   --r2 PATH                  R2 FASTQ (omit for single-end).
+#   --sample-id NAME           Override sample_id (default: derived from R1).
+#   --species NAME             Override species name (default: sample_id).
+#   --expected-size BP         Optional expected genome size (bp), shown in the report.
+#   -i, --input PATH           Samplesheet CSV (multi-sample alternative).
+#                              Default if neither --r1 nor --input is set:
+#                              assets/samplesheet_test.csv
+#
+# Run options:
 #   -l, --gurobi-lic PATH      Path to Gurobi WLS licence. Default: ~/gurobi.lic
 #   -p, --partition NAME       SLURM partition. Default: scc-cpu
 #                              (NHR users: standard96 / standard96s)
@@ -38,7 +47,12 @@ set -euo pipefail
 
 # --- Defaults ------------------------------------------------------------
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-INPUT="${REPO_DIR}/assets/samplesheet_test.csv"
+INPUT=""
+R1=""
+R2=""
+SAMPLE_ID=""
+SPECIES=""
+EXPECTED_SIZE=""
 ACCOUNT="${GWDG_ACCOUNT:-}"
 GUROBI_LIC="${GUROBI_LIC:-$HOME/gurobi.lic}"
 PARTITION="${GWDG_PARTITION:-scc-cpu}"
@@ -49,11 +63,16 @@ NF_EXTRA=()
 
 log() { printf '[run_gwdg] %s\n' "$*"; }
 die() { printf '[run_gwdg] ERROR: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # --- Parse flags ---------------------------------------------------------
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --r1)                  R1="$2";          shift 2 ;;
+        --r2)                  R2="$2";          shift 2 ;;
+        --sample-id)           SAMPLE_ID="$2";   shift 2 ;;
+        --species)             SPECIES="$2";     shift 2 ;;
+        --expected-size)       EXPECTED_SIZE="$2"; shift 2 ;;
         -i|--input)            INPUT="$2";       shift 2 ;;
         -a|--account)          ACCOUNT="$2";     shift 2 ;;
         -l|--gurobi-lic)       GUROBI_LIC="$2";  shift 2 ;;
@@ -64,12 +83,20 @@ while [[ $# -gt 0 ]]; do
         -h|--help)             usage; exit 0 ;;
         --)                    shift; NF_EXTRA=("$@"); break ;;
         -*)                    die "unknown option: $1 (try --help)" ;;
-        *)                     die "unexpected positional arg: $1 (use --input PATH)" ;;
+        *)                     die "unexpected positional arg: $1 (use --r1 or --input)" ;;
     esac
 done
 
 # --- Pre-flight ----------------------------------------------------------
-[[ -f "$INPUT" ]]      || die "samplesheet not found: $INPUT"
+# Direct reads mode wins; otherwise fall back to a samplesheet (the committed
+# test CSV is the implicit default so `run_gwdg.sh` with no args still runs).
+if [[ -n "$R1" ]]; then
+    [[ -f "$R1" ]] || die "R1 not found: $R1"
+    [[ -z "$R2" || -f "$R2" ]] || die "R2 not found: $R2"
+elif [[ -z "$INPUT" ]]; then
+    INPUT="${REPO_DIR}/assets/samplesheet_test.csv"
+fi
+[[ -z "$INPUT" || -f "$INPUT" ]] || die "samplesheet not found: $INPUT"
 [[ -f "$GUROBI_LIC" ]] || die "Gurobi licence not found at: $GUROBI_LIC
        Get a free academic WLS licence at https://www.gurobi.com/academia/
        and save it to ~/gurobi.lic (or pass --gurobi-lic /path/to/file)."
@@ -146,7 +173,14 @@ fi
 # --- Launch --------------------------------------------------------------
 cd "$REPO_DIR"
 log "launching pipeline"
-log "  samplesheet : $INPUT"
+if [[ -n "$R1" ]]; then
+    log "  reads       : $R1${R2:+ + $R2}"
+    [[ -n "$SAMPLE_ID" ]]     && log "  sample_id   : $SAMPLE_ID"
+    [[ -n "$SPECIES" ]]       && log "  species     : $SPECIES"
+    [[ -n "$EXPECTED_SIZE" ]] && log "  expected bp : $EXPECTED_SIZE"
+else
+    log "  samplesheet : $INPUT"
+fi
 log "  partition   : $PARTITION"
 log "  workspace   : $GWDG_WORKSPACE ($WS_FS)"
 log "  gurobi lic  : $GUROBI_LIC"
@@ -154,11 +188,18 @@ log "  gurobi lic  : $GUROBI_LIC"
 [[ ${#NF_EXTRA[@]} -gt 0 ]]   && log "  extra nf args: ${NF_EXTRA[*]}"
 echo
 
-nextflow run . \
-    -profile gwdg \
-    --input "$INPUT" \
-    --respect_container "$RESPECT_SIF" \
-    "${NF_EXTRA[@]}"
+NF_ARGS=( -profile gwdg --respect_container "$RESPECT_SIF" )
+if [[ -n "$R1" ]]; then
+    NF_ARGS+=( --r1 "$R1" )
+    [[ -n "$R2" ]]            && NF_ARGS+=( --r2 "$R2" )
+    [[ -n "$SAMPLE_ID" ]]     && NF_ARGS+=( --sample_id "$SAMPLE_ID" )
+    [[ -n "$SPECIES" ]]       && NF_ARGS+=( --species "$SPECIES" )
+    [[ -n "$EXPECTED_SIZE" ]] && NF_ARGS+=( --expected_size "$EXPECTED_SIZE" )
+else
+    NF_ARGS+=( --input "$INPUT" )
+fi
+
+nextflow run . "${NF_ARGS[@]}" "${NF_EXTRA[@]}"
 
 echo
 log "done."

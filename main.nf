@@ -40,12 +40,38 @@ def parseSamplesheet(csvPath) {
         }
 }
 
-workflow {
-    if (!params.input) {
-        error "Missing --input <samplesheet.csv>. See assets/samplesheet_test.csv for the format."
-    }
+// Build a one-row channel from --r1/--r2 flags (single-sample shortcut).
+// sample_id falls back to R1's basename with a trailing _R1/_1 stripped, so
+// Pmisa_R1.fastq.gz -> Pmisa, sample.1.fq.gz -> sample.
+def parseDirectReads() {
+    def r1 = file(params.r1, checkIfExists: true)
+    def r2 = params.r2 ? file(params.r2, checkIfExists: true) : null
+    def reads = r2 ? [r1, r2] : [r1]
 
-    reads_ch = parseSamplesheet(params.input)
+    def derived_id = r1.simpleName.replaceAll(/[._-]?[Rr]?1$/, '')
+    def id         = params.sample_id ?: (derived_id ?: r1.simpleName)
+    def size_v     = params.expected_size ? params.expected_size.toString().toLong() : null
+
+    def meta = [
+        id:            id,
+        species:       params.species ?: id,
+        single_end:    r2 == null,
+        expected_size: size_v,
+    ]
+    Channel.of(tuple(meta, reads))
+}
+
+workflow {
+    if (params.r1) {
+        reads_ch = parseDirectReads()
+    } else if (params.input) {
+        reads_ch = parseSamplesheet(params.input)
+    } else {
+        error """No input given. Pick one:
+  --r1 <R1.fq.gz> [--r2 <R2.fq.gz>]   single-sample shortcut
+  --input <samplesheet.csv>           multi-sample (see assets/samplesheet_test.csv)
+"""
+    }
 
     READ_QC(reads_ch)
     ASSEMBLY(READ_QC.out.reads)
