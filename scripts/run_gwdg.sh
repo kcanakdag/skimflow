@@ -22,12 +22,19 @@
 #   --sample-id NAME           Override sample_id (default: derived from R1).
 #   --species NAME             Override species name (default: sample_id).
 #   --expected-size BP         Optional expected genome size (bp), shown in the report.
+#   --long-reads PATH          Long-read FASTQ for a single long-read sample.
+#                              Long-only direct mode; do not combine with --r1/--input.
+#   --lr-type NAME             Long-read tech: nanopore (default) or pacbio.
 #   -i, --input PATH           Samplesheet CSV (multi-sample alternative).
 #                              Default if neither --r1 nor --input is set:
 #                              assets/samplesheet_test.csv
 #
 # Run options:
 #   -l, --gurobi-lic PATH      Path to Gurobi WLS licence. Default: ~/gurobi.lic
+#   --kraken2-db PATH          kraken2 DB directory for short-read decontam (optional).
+#                              Known-good GWDG default (Mateo): /mnt/ceph-ssd/workspaces/
+#                              ws/scc_ubet_bleidorn/u16307-genome_size/dodecaceria/
+#                              k2_pluspfp_16_GB_20260226
 #   -p, --partition NAME       SLURM partition. Default: scc-cpu
 #                              (NHR users: standard96 / standard96s)
 #   -f, --filesystem NAME      Workspace filesystem. Default: ceph-ssd
@@ -53,6 +60,9 @@ R2=""
 SAMPLE_ID=""
 SPECIES=""
 EXPECTED_SIZE=""
+LONG_READS=""
+LR_TYPE=""
+KRAKEN2_DB=""
 ACCOUNT="${GWDG_ACCOUNT:-}"
 GUROBI_LIC="${GUROBI_LIC:-$HOME/gurobi.lic}"
 PARTITION="${GWDG_PARTITION:-scc-cpu}"
@@ -63,7 +73,7 @@ NF_EXTRA=()
 
 log() { printf '[run_gwdg] %s\n' "$*"; }
 die() { printf '[run_gwdg] ERROR: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,51p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # --- Parse flags ---------------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -73,6 +83,9 @@ while [[ $# -gt 0 ]]; do
         --sample-id)           SAMPLE_ID="$2";   shift 2 ;;
         --species)             SPECIES="$2";     shift 2 ;;
         --expected-size)       EXPECTED_SIZE="$2"; shift 2 ;;
+        --long-reads)          LONG_READS="$2";  shift 2 ;;
+        --lr-type)             LR_TYPE="$2";     shift 2 ;;
+        --kraken2-db)          KRAKEN2_DB="$2";  shift 2 ;;
         -i|--input)            INPUT="$2";       shift 2 ;;
         -a|--account)          ACCOUNT="$2";     shift 2 ;;
         -l|--gurobi-lic)       GUROBI_LIC="$2";  shift 2 ;;
@@ -88,18 +101,26 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Pre-flight ----------------------------------------------------------
-# Direct reads mode wins; otherwise fall back to a samplesheet (the committed
-# test CSV is the implicit default so `run_gwdg.sh` with no args still runs).
+# Exactly one input mode: --r1 (short), --long-reads (long), or a samplesheet.
+# The committed test CSV is the implicit default when none is given.
+[[ -n "$LONG_READS" && ( -n "$R1" || -n "$INPUT" ) ]] && \
+    die "--long-reads is long-only; do not combine with --r1 or --input"
+
 if [[ -n "$R1" ]]; then
     [[ -f "$R1" ]] || die "R1 not found: $R1"
     [[ -z "$R2" || -f "$R2" ]] || die "R2 not found: $R2"
+elif [[ -n "$LONG_READS" ]]; then
+    [[ -f "$LONG_READS" ]] || die "long reads not found: $LONG_READS"
 elif [[ -z "$INPUT" ]]; then
     INPUT="${REPO_DIR}/assets/samplesheet_test.csv"
 fi
 [[ -z "$INPUT" || -f "$INPUT" ]] || die "samplesheet not found: $INPUT"
-[[ -f "$GUROBI_LIC" ]] || die "Gurobi licence not found at: $GUROBI_LIC
+[[ -z "$KRAKEN2_DB" || -d "$KRAKEN2_DB" ]] || die "kraken2 DB dir not found: $KRAKEN2_DB"
+if [[ -z "$LONG_READS" ]]; then
+    [[ -f "$GUROBI_LIC" ]] || die "Gurobi licence not found at: $GUROBI_LIC
        Get a free academic WLS licence at https://www.gurobi.com/academia/
        and save it to ~/gurobi.lic (or pass --gurobi-lic /path/to/file)."
+fi
 
 # --- Module loads --------------------------------------------------------
 if ! type module >/dev/null 2>&1; then
@@ -155,7 +176,9 @@ RESPECT_SIF="$APPTAINER_CACHEDIR/respect_0.2.sif"
 build_respect() {
     apptainer build "$RESPECT_SIF" "$REPO_DIR/containers/respect/respect.def"
 }
-if [[ ! -f "$RESPECT_SIF" ]]; then
+if [[ -n "$LONG_READS" ]]; then
+    log "long-read-only run: skipping RESPECT licence check and image build (RESPECT not used)"
+elif [[ ! -f "$RESPECT_SIF" ]]; then
     if [[ "$PARTITION" == scc-* ]]; then
         # SCC policy: don't build containers on login nodes.
         log "building RESPECT image inside an srun job (SCC policy)"
@@ -178,9 +201,16 @@ if [[ -n "$R1" ]]; then
     [[ -n "$SAMPLE_ID" ]]     && log "  sample_id   : $SAMPLE_ID"
     [[ -n "$SPECIES" ]]       && log "  species     : $SPECIES"
     [[ -n "$EXPECTED_SIZE" ]] && log "  expected bp : $EXPECTED_SIZE"
+elif [[ -n "$LONG_READS" ]]; then
+    log "  long reads  : $LONG_READS"
+    log "  lr_type     : ${LR_TYPE:-nanopore (default)}"
+    [[ -n "$SAMPLE_ID" ]]     && log "  sample_id   : $SAMPLE_ID"
+    [[ -n "$SPECIES" ]]       && log "  species     : $SPECIES"
+    [[ -n "$EXPECTED_SIZE" ]] && log "  expected bp : $EXPECTED_SIZE"
 else
     log "  samplesheet : $INPUT"
 fi
+[[ -n "$KRAKEN2_DB" ]]        && log "  kraken2 db  : $KRAKEN2_DB"
 log "  partition   : $PARTITION"
 log "  workspace   : $GWDG_WORKSPACE ($WS_FS)"
 log "  gurobi lic  : $GUROBI_LIC"
@@ -189,9 +219,16 @@ log "  gurobi lic  : $GUROBI_LIC"
 echo
 
 NF_ARGS=( -profile gwdg --respect_container "$RESPECT_SIF" )
+[[ -n "$KRAKEN2_DB" ]] && NF_ARGS+=( --kraken2_db "$KRAKEN2_DB" )
 if [[ -n "$R1" ]]; then
     NF_ARGS+=( --r1 "$R1" )
     [[ -n "$R2" ]]            && NF_ARGS+=( --r2 "$R2" )
+    [[ -n "$SAMPLE_ID" ]]     && NF_ARGS+=( --sample_id "$SAMPLE_ID" )
+    [[ -n "$SPECIES" ]]       && NF_ARGS+=( --species "$SPECIES" )
+    [[ -n "$EXPECTED_SIZE" ]] && NF_ARGS+=( --expected_size "$EXPECTED_SIZE" )
+elif [[ -n "$LONG_READS" ]]; then
+    NF_ARGS+=( --long_reads "$LONG_READS" )
+    [[ -n "$LR_TYPE" ]]       && NF_ARGS+=( --lr_type "$LR_TYPE" )
     [[ -n "$SAMPLE_ID" ]]     && NF_ARGS+=( --sample_id "$SAMPLE_ID" )
     [[ -n "$SPECIES" ]]       && NF_ARGS+=( --species "$SPECIES" )
     [[ -n "$EXPECTED_SIZE" ]] && NF_ARGS+=( --expected_size "$EXPECTED_SIZE" )

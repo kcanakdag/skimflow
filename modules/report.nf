@@ -11,9 +11,10 @@ process REPORT {
     memory '2 GB'
 
     input:
-    path qc_files,         stageAs: 'qc/*'
+    path qc_files,          stageAs: 'qc/*'
     path genome_size_files, stageAs: 'genome_size/*'
     path busco_summaries,   stageAs: 'busco/*'
+    path kraken_reports,    stageAs: 'kraken/*'
 
     output:
     path 'multiqc_report.html',          emit: html
@@ -25,12 +26,12 @@ process REPORT {
     # input file; if a step was skipped (e.g. --skip_respect) or all its tasks
     # failed-ignored (mito/markers on tiny test data), the dir is absent and
     # multiqc bails out. Create empty placeholders to keep the CLI uniform.
-    mkdir -p qc genome_size busco
+    mkdir -p qc genome_size busco kraken
 
     multiqc \\
         --force \\
         --filename multiqc_report.html \\
         --title 'skimflow' \\
-        qc genome_size busco
+        qc genome_size busco kraken
     """
 }

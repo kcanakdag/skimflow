@@ -8,7 +8,7 @@ From paired-end (or single-end) Illumina skim reads, skimflow produces:
 
 - **Trimmed reads** with fastp
 - **Genome size + coverage estimate** with RESPECT (the "is this data good enough?" gate)
-- **De novo assembly** with SPAdes
+- **De novo assembly** with MEGAHIT (short reads) or Flye (long reads)
 - **Mitogenome** with GetOrganelle
 - **BUSCO marker scores** against the chosen lineage
 - **One-page MultiQC HTML report** that summarises everything above
@@ -74,8 +74,48 @@ demo,reads/demo_R1.fastq.gz,reads/demo_R2.fastq.gz,Bostrychus_sinensis,100000000
 - Empty `fastq_2` → single-end mode.
 - `expected_genome_size_bp` is optional; if set, it appears alongside RESPECT's data-derived estimate in the MultiQC report as a sanity check.
 - Relative paths are resolved against the repo root.
+- For a long-read sample, give the row a `long_reads` column (and optional `lr_type`) instead of `fastq_1`/`fastq_2`; see Optional steps below.
 
 Working example: `assets/samplesheet_test.csv`.
+
+## Optional steps
+
+### Long-read assembly (Flye)
+
+A sample is either short-read or long-read, never both. Long-read samples run
+Filtlong then Flye and are scored by BUSCO; they do NOT run RESPECT genome-size
+estimation or GetOrganelle mitogenome extraction (those are Illumina k-mer
+tools).
+
+Single long-read sample:
+
+```bash
+nextflow run . -profile podman --long_reads reads.fastq.gz --lr_type nanopore
+```
+
+`--lr_type` is `nanopore` (default) or `pacbio`. By default nanopore uses Flye's
+`--nano-hq` (recommended for Guppy5+ / R10 chemistry) and pacbio uses
+`--pacbio-raw`. Override with `--flye_mode '--nano-raw'` (legacy chemistry) or
+`--flye_mode '--pacbio-hifi'` (HiFi reads).
+
+In a samplesheet, give a row a `long_reads` column (and optional `lr_type`)
+instead of `fastq_1`/`fastq_2`. Short and long rows can coexist in one sheet;
+each is routed to the right assembler and both feed BUSCO.
+
+### Decontamination (kraken2)
+
+Short-read only, opt-in. Classify reads against a kraken2 DB and keep the
+unclassified reads (the target) as the clean set feeding MEGAHIT, RESPECT, and
+GetOrganelle:
+
+```bash
+nextflow run . -profile podman --input my.csv --kraken2_db /path/to/k2_db
+```
+
+When decontam is on, RESPECT runs on the decontaminated read set; keeping
+unclassified reads can slightly shift the k-mer spectrum (small for animal
+targets against a microbial-heavy DB such as PlusPFP). kraken2 loads the whole
+DB into RAM (~17 to 20 GB for the 16 GB index).
 
 ## Output layout
 
@@ -84,8 +124,10 @@ Everything lands under `results/`:
 ```
 results/
 ├── qc/<sample>/             fastp JSON + trimmed reads
+├── decontam/<sample>/       kraken2 cleaned reads + report (when --kraken2_db is set)
 ├── genome_size/<sample>/    RESPECT estimates
-├── assembly/<sample>/       SPAdes contigs, scaffolds, log
+├── long_read_qc/<sample>/   Filtlong-filtered reads (long-read samples)
+├── assembly/<sample>/       MEGAHIT (short) or Flye (long) contigs
 ├── mitogenome/<sample>/     GetOrganelle output
 ├── markers/<sample>/        BUSCO short_summary + full output
 └── report/                  multiqc_report.html
@@ -96,8 +138,10 @@ results/
 | Step | Tool |
 | --- | --- |
 | Read QC | fastp |
+| Decontamination (optional) | kraken2 |
 | Genome size + coverage | RESPECT (Sayyari et al. 2022); needs a Gurobi licence |
-| Assembly | SPAdes |
+| Short-read assembly | MEGAHIT |
+| Long-read QC + assembly | Filtlong + Flye |
 | Mitogenome | GetOrganelle |
 | Markers | BUSCO |
 | Report | MultiQC |

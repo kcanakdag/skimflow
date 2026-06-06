@@ -1,6 +1,7 @@
 // Marker extraction with BUSCO.
-// Runs in genome mode against the SPAdes contigs; the BUSCO short summary
-// gives the standard C/F/D/M numbers used in skim assembly papers.
+// Runs in genome mode against the assembly (MEGAHIT for short reads, Flye for
+// long reads); the BUSCO short summary gives the standard C/F/D/M numbers used
+// in skim assembly papers.
 
 process BUSCO_DB {
     tag "${lineage}"
