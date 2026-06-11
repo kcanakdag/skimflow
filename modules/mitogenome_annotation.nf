@@ -37,6 +37,10 @@ process MITOZ_ANNOTATE {
     cpus 4
     memory '8 GB'
     time '2h'
+    // The set +e / exit 0 below soft-fails on tool errors, but a container that
+    // cannot launch or a preamble failure still aborts the task. Ignore so an
+    // annotation hiccup never takes down the report (same policy as MARKERS).
+    errorStrategy 'ignore'
 
     input:
     tuple val(meta), path(fasta)
@@ -135,6 +139,8 @@ process MITOS2_ANNOTATE {
     cpus 4
     memory '8 GB'
     time '2h'
+    // See MITOZ_ANNOTATE: ignore so an annotation failure never aborts the run.
+    errorStrategy 'ignore'
 
     input:
     tuple val(meta), path(fasta)
@@ -176,7 +182,7 @@ process MITOS2_ANNOTATE {
     mkdir -p ${meta.id}.mitos2
 
     set +e
-    runmitos.py \\
+    runmitos \\
         --input ${fasta} \\
         --code ${params.mitos2_genetic_code} \\
         --outdir ${meta.id}.mitos2 \\
@@ -195,10 +201,14 @@ process MITOS2_ANNOTATE {
     if [ -n "\$gff" ]; then
         cp "\$gff" ${meta.id}.mitos2.gff
         gff_out="yes"
-        cds=\$(awk 'BEGIN{c=0} !/^#/ && tolower(\$3)=="cds"{c++} END{print c+0}' "\$gff")
-        trna=\$(awk 'BEGIN{c=0} !/^#/ && tolower(\$3) ~ /trna/{c++} END{print c+0}' "\$gff")
-        rrna=\$(awk 'BEGIN{c=0} !/^#/ && tolower(\$3) ~ /rrna/{c++} END{print c+0}' "\$gff")
-        features=\$(awk 'BEGIN{c=0} !/^#/ && NF>=3{c++} END{print c+0}' "\$gff")
+        # MITOS2 GFF marks protein-coding genes as feature type "gene" (tRNA and
+        # rRNA use their own types plus ncRNA_gene), so "gene" is the CDS
+        # equivalent. Count gene-level features only and define Features the same
+        # way MitoZ does (cds+trna+rrna) so the two report tables are comparable.
+        cds=\$(awk -F'\\t' 'BEGIN{c=0} !/^#/ && tolower(\$3)=="gene"{c++} END{print c+0}' "\$gff")
+        trna=\$(awk -F'\\t' 'BEGIN{c=0} !/^#/ && tolower(\$3)=="trna"{c++} END{print c+0}' "\$gff")
+        rrna=\$(awk -F'\\t' 'BEGIN{c=0} !/^#/ && tolower(\$3)=="rrna"{c++} END{print c+0}' "\$gff")
+        features=\$((cds + trna + rrna))
     else
         gff_out="no"
         cds=0
