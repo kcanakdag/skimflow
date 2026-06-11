@@ -2,15 +2,16 @@
 
 nextflow.enable.dsl = 2
 
-include { READ_QC }            from './modules/read_qc.nf'
-include { DECONTAM }           from './modules/decontam.nf'
-include { GENOME_SIZE }        from './modules/genome_size.nf'
-include { ASSEMBLY }           from './modules/assembly.nf'
-include { LR_QC }              from './modules/long_read_qc.nf'
-include { FLYE }               from './modules/flye.nf'
-include { MITO }               from './modules/mitogenome.nf'
-include { MARKER_EXTRACTION }  from './modules/markers.nf'
-include { REPORT }             from './modules/report.nf'
+include { READ_QC }               from './modules/read_qc.nf'
+include { DECONTAM }              from './modules/decontam.nf'
+include { GENOME_SIZE }           from './modules/genome_size.nf'
+include { ASSEMBLY }              from './modules/assembly.nf'
+include { LR_QC }                 from './modules/long_read_qc.nf'
+include { FLYE }                  from './modules/flye.nf'
+include { MITO }                  from './modules/mitogenome.nf'
+include { MITOGENOME_ANNOTATION } from './modules/mitogenome_annotation.nf'
+include { MARKER_EXTRACTION }     from './modules/markers.nf'
+include { REPORT }                from './modules/report.nf'
 
 // Allowed long-read technologies (used to validate meta.lr_type at parse time).
 // Declared as a function (not a top-level statement) so the strict Nextflow
@@ -138,7 +139,6 @@ workflow {
   --input <samplesheet.csv>           multi-sample (see assets/samplesheet_test.csv)
 """
     }
-
     // Split into the two disjoint tracks. No join/remainder: samples never
     // belong to both, so the two contigs streams simply mix before BUSCO.
     short_in = parsed_ch.filter { meta, reads, lr -> meta.read_type == 'short' }
@@ -161,6 +161,12 @@ workflow {
 
     ASSEMBLY(clean_reads)        // MEGAHIT
     MITO(clean_reads)
+    MITOGENOME_ANNOTATION(MITO.out.fasta)
+    mitogenome_summary_ch = MITO.out.summary
+        .mix(MITOGENOME_ANNOTATION.out.summary)
+        .map { meta, f -> f }
+        .collect()
+        .ifEmpty([])
 
     if (params.skip_respect) {
         genome_size_ch = Channel.empty().collect().ifEmpty([])
@@ -181,5 +187,6 @@ workflow {
         genome_size_ch,
         MARKER_EXTRACTION.out.summary.map { meta, f -> f }.collect().ifEmpty([]),
         kraken_report_ch,
+        mitogenome_summary_ch,
     )
 }

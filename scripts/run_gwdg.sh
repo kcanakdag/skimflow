@@ -10,8 +10,8 @@
 #   4. Builds the RESPECT Apptainer image. SCC policy forbids container
 #      builds on login nodes, so on scc-* partitions the build runs inside
 #      an interactive srun job.
-#   5. Checks the Gurobi licence file is present.
-#   6. Runs `nextflow run . -profile gwdg` with the chosen samplesheet.
+#   5. Checks the Gurobi licence file when short-read RESPECT is needed.
+#   6. Runs `nextflow run . -profile gwdg` with the chosen input.
 #
 # Usage:
 #   ./scripts/run_gwdg.sh [options] [-- extra nextflow args]
@@ -31,10 +31,9 @@
 #
 # Run options:
 #   -l, --gurobi-lic PATH      Path to Gurobi WLS licence. Default: ~/gurobi.lic
+#   --skip-respect             Do not run RESPECT; no Gurobi licence is needed.
 #   --kraken2-db PATH          kraken2 DB directory for short-read decontam (optional).
-#                              Known-good GWDG default (Mateo): /mnt/ceph-ssd/workspaces/
-#                              ws/scc_ubet_bleidorn/u16307-genome_size/dodecaceria/
-#                              k2_pluspfp_16_GB_20260226
+#   --mitos2-refdir PATH       Pre-downloaded MITOS2 reference data directory (optional).
 #   -p, --partition NAME       SLURM partition. Default: scc-cpu
 #                              (NHR users: standard96 / standard96s)
 #   -f, --filesystem NAME      Workspace filesystem. Default: ceph-ssd
@@ -62,10 +61,18 @@ SPECIES=""
 EXPECTED_SIZE=""
 LONG_READS=""
 LR_TYPE=""
-KRAKEN2_DB=""
+KRAKEN2_DB="${KRAKEN2_DB:-}"
+MITOS2_REFDIR="${MITOS2_REFDIR:-}"
 ACCOUNT="${GWDG_ACCOUNT:-}"
 GUROBI_LIC="${GUROBI_LIC:-$HOME/gurobi.lic}"
+SKIP_RESPECT="${SKIP_RESPECT:-false}"
 PARTITION="${GWDG_PARTITION:-scc-cpu}"
+if [[ -v GWDG_CLUSTER_OPTS ]]; then
+    GWDG_CLUSTER_OPTS="${GWDG_CLUSTER_OPTS}"
+else
+    GWDG_CLUSTER_OPTS="--constraint=inet"
+fi
+GWDG_PROXY="${GWDG_PROXY:-http://www-cache.gwdg.de:3128}"
 WS_FS="${GWDG_WS_FS:-ceph-ssd}"
 WS_NAME="${GWDG_WS_NAME:-genome-skim}"
 WS_DAYS="${GWDG_WS_DAYS:-30}"
@@ -73,7 +80,52 @@ NF_EXTRA=()
 
 log() { printf '[run_gwdg] %s\n' "$*"; }
 die() { printf '[run_gwdg] ERROR: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,51p' "$0" | sed 's/^# \{0,1\}//'; }
+abs_path() {
+    local p="$1"
+    [[ -z "$p" ]] && return 0
+    realpath "$p"
+}
+samplesheet_has_short_reads() {
+    local csv="$1"
+    awk -F',' '
+        NR == 1 {
+            for (i = 1; i <= NF; i++) {
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
+                gsub(/^"|"$/, "", $i)
+                if ($i == "fastq_1") col = i
+            }
+            next
+        }
+        col {
+            v = $col
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+            gsub(/^"|"$/, "", v)
+            if (v != "") { found = 1; exit }
+        }
+        END { exit found ? 0 : 1 }
+    ' "$csv"
+}
+nf_extra_skips_respect() {
+    local prev=""
+    local arg
+    for arg in "${NF_EXTRA[@]}"; do
+        if [[ "$prev" == "--skip_respect" && "$arg" == "true" ]]; then
+            return 0
+        fi
+        if [[ "$arg" == "--skip_respect=true" ]]; then
+            return 0
+        fi
+        prev="$arg"
+    done
+    return 1
+}
+usage() {
+    awk '
+        NR == 1 { next }
+        /^#/ { sub(/^# ?/, ""); print; next }
+        { exit }
+    ' "$0"
+}
 
 # --- Parse flags ---------------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -85,7 +137,9 @@ while [[ $# -gt 0 ]]; do
         --expected-size)       EXPECTED_SIZE="$2"; shift 2 ;;
         --long-reads)          LONG_READS="$2";  shift 2 ;;
         --lr-type)             LR_TYPE="$2";     shift 2 ;;
+        --skip-respect)        SKIP_RESPECT=true; shift ;;
         --kraken2-db)          KRAKEN2_DB="$2";  shift 2 ;;
+        --mitos2-refdir)       MITOS2_REFDIR="$2"; shift 2 ;;
         -i|--input)            INPUT="$2";       shift 2 ;;
         -a|--account)          ACCOUNT="$2";     shift 2 ;;
         -l|--gurobi-lic)       GUROBI_LIC="$2";  shift 2 ;;
@@ -116,11 +170,31 @@ elif [[ -z "$INPUT" ]]; then
 fi
 [[ -z "$INPUT" || -f "$INPUT" ]] || die "samplesheet not found: $INPUT"
 [[ -z "$KRAKEN2_DB" || -d "$KRAKEN2_DB" ]] || die "kraken2 DB dir not found: $KRAKEN2_DB"
-if [[ -z "$LONG_READS" ]]; then
+[[ -z "$MITOS2_REFDIR" || -d "$MITOS2_REFDIR" ]] || die "MITOS2 refdir not found: $MITOS2_REFDIR"
+
+HAS_SHORT_SAMPLES=false
+if [[ -n "$R1" ]]; then
+    HAS_SHORT_SAMPLES=true
+elif [[ -n "$INPUT" ]] && samplesheet_has_short_reads "$INPUT"; then
+    HAS_SHORT_SAMPLES=true
+fi
+if nf_extra_skips_respect; then
+    SKIP_RESPECT=true
+fi
+
+if [[ "$HAS_SHORT_SAMPLES" == true && "$SKIP_RESPECT" != true ]]; then
     [[ -f "$GUROBI_LIC" ]] || die "Gurobi licence not found at: $GUROBI_LIC
        Get a free academic WLS licence at https://www.gurobi.com/academia/
        and save it to ~/gurobi.lic (or pass --gurobi-lic /path/to/file)."
 fi
+
+[[ -n "$R1" ]]            && R1="$(abs_path "$R1")"
+[[ -n "$R2" ]]            && R2="$(abs_path "$R2")"
+[[ -n "$LONG_READS" ]]    && LONG_READS="$(abs_path "$LONG_READS")"
+[[ -n "$INPUT" ]]         && INPUT="$(abs_path "$INPUT")"
+[[ -n "$KRAKEN2_DB" ]]    && KRAKEN2_DB="$(abs_path "$KRAKEN2_DB")"
+[[ -n "$MITOS2_REFDIR" ]] && MITOS2_REFDIR="$(abs_path "$MITOS2_REFDIR")"
+[[ -f "$GUROBI_LIC" ]]    && GUROBI_LIC="$(abs_path "$GUROBI_LIC")"
 
 # --- Module loads --------------------------------------------------------
 if ! type module >/dev/null 2>&1; then
@@ -166,23 +240,36 @@ APPTAINER_CACHEDIR="$GWDG_WORKSPACE/apptainer_cache"
 mkdir -p "$APPTAINER_CACHEDIR"
 
 # Env vars consumed by conf/gwdg.config.
-export GWDG_WORKSPACE GWDG_PARTITION="$PARTITION"
+export GWDG_WORKSPACE GWDG_PARTITION="$PARTITION" GWDG_CLUSTER_OPTS
 [[ -n "$ACCOUNT" ]] && export GWDG_ACCOUNT="$ACCOUNT"
 export APPTAINER_CACHEDIR GUROBI_LIC
 export NXF_APPTAINER_CACHEDIR="$APPTAINER_CACHEDIR"
+if [[ -n "$GWDG_PROXY" ]]; then
+    export http_proxy="${http_proxy:-$GWDG_PROXY}"
+    export https_proxy="${https_proxy:-$GWDG_PROXY}"
+    export ftp_proxy="${ftp_proxy:-$GWDG_PROXY}"
+    export APPTAINERENV_http_proxy="${APPTAINERENV_http_proxy:-$GWDG_PROXY}"
+    export APPTAINERENV_https_proxy="${APPTAINERENV_https_proxy:-$GWDG_PROXY}"
+    export APPTAINERENV_ftp_proxy="${APPTAINERENV_ftp_proxy:-$GWDG_PROXY}"
+fi
 
 # --- RESPECT container ---------------------------------------------------
 RESPECT_SIF="$APPTAINER_CACHEDIR/respect_0.2.sif"
+export REPO_DIR RESPECT_SIF
 build_respect() {
     apptainer build "$RESPECT_SIF" "$REPO_DIR/containers/respect/respect.def"
 }
-if [[ -n "$LONG_READS" ]]; then
-    log "long-read-only run: skipping RESPECT licence check and image build (RESPECT not used)"
+if [[ "$HAS_SHORT_SAMPLES" != true ]]; then
+    log "no short-read samples: skipping RESPECT image build (RESPECT not used)"
+elif [[ "$SKIP_RESPECT" == true ]]; then
+    log "skipping RESPECT image build (--skip-respect)"
 elif [[ ! -f "$RESPECT_SIF" ]]; then
     if [[ "$PARTITION" == scc-* ]]; then
         # SCC policy: don't build containers on login nodes.
         log "building RESPECT image inside an srun job (SCC policy)"
-        srun --partition="$PARTITION" --time=00:30:00 \
+        SRUN_EXTRA=()
+        [[ -n "$GWDG_CLUSTER_OPTS" ]] && read -r -a SRUN_EXTRA <<< "$GWDG_CLUSTER_OPTS"
+        srun "${SRUN_EXTRA[@]}" --partition="$PARTITION" --time=00:30:00 \
              --cpus-per-task=4 --mem=8G \
              bash -c "$(declare -f build_respect); build_respect"
     else
@@ -211,15 +298,19 @@ else
     log "  samplesheet : $INPUT"
 fi
 [[ -n "$KRAKEN2_DB" ]]        && log "  kraken2 db  : $KRAKEN2_DB"
+[[ -n "$MITOS2_REFDIR" ]]     && log "  MITOS2 ref  : $MITOS2_REFDIR"
+[[ "$SKIP_RESPECT" == true ]] && log "  RESPECT     : skipped"
 log "  partition   : $PARTITION"
 log "  workspace   : $GWDG_WORKSPACE ($WS_FS)"
-log "  gurobi lic  : $GUROBI_LIC"
+[[ "$SKIP_RESPECT" != true ]]  && log "  gurobi lic  : $GUROBI_LIC"
 [[ -n "$ACCOUNT" ]]           && log "  account     : $ACCOUNT (explicit override)"
 [[ ${#NF_EXTRA[@]} -gt 0 ]]   && log "  extra nf args: ${NF_EXTRA[*]}"
 echo
 
 NF_ARGS=( -profile gwdg --respect_container "$RESPECT_SIF" )
+[[ "$SKIP_RESPECT" == true ]] && NF_ARGS+=( --skip_respect true )
 [[ -n "$KRAKEN2_DB" ]] && NF_ARGS+=( --kraken2_db "$KRAKEN2_DB" )
+[[ -n "$MITOS2_REFDIR" ]] && NF_ARGS+=( --mitos2_refdir "$MITOS2_REFDIR" )
 if [[ -n "$R1" ]]; then
     NF_ARGS+=( --r1 "$R1" )
     [[ -n "$R2" ]]            && NF_ARGS+=( --r2 "$R2" )

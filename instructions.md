@@ -14,7 +14,6 @@ https://github.com/fethalen/Patchwork
 
 The general structure of the pipeline and some programs you can use are in the attached md file. I will come back to you with some .fastq files that you can use for testing the pipeline.  You can come and work in the department, but you can also work from home, it is totally fine . Don't hesitate to ask any questions, we can always meet and discuss things in more detail :) 
 
-Have a nice rest of the week, Mateo
 
 
 

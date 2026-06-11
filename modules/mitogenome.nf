@@ -38,10 +38,9 @@ process MITOGENOME {
     memory '6 GB'
     time '4h'
 
-    // GetOrganelle returns non-zero when it cannot finish the assembly
-    // (e.g. too few mitochondrial reads). For a smoke test this is fine -
-    // we capture the log and continue the pipeline.
-    errorStrategy 'ignore'
+    // GetOrganelle can return non-zero when it cannot finish the assembly
+    // (e.g. too few mitochondrial reads). Capture that in a summary instead
+    // of taking down the rest of the run.
 
     input:
     tuple val(meta),  path(reads)
@@ -50,10 +49,14 @@ process MITOGENOME {
     output:
     tuple val(meta), path("${meta.id}.mito.fasta"),     emit: fasta, optional: true
     tuple val(meta), path("${meta.id}.mito.log.txt"),   emit: logfile
+    tuple val(meta), path("${meta.id}.getorganelle_mqc.tsv"), emit: summary
 
     script:
     def in_args = meta.single_end ? "-u ${reads[0]}" : "-1 ${reads[0]} -2 ${reads[1]}"
     """
+    set -euo pipefail
+
+    set +e
     GETORG_PATH=\$PWD/${db} \\
     get_organelle_from_reads.py \\
         ${in_args} \\
@@ -62,15 +65,53 @@ process MITOGENOME {
         -k 21,45,65,85,105 \\
         -t ${task.cpus} \\
         -R 10
+    status=\$?
+    set -e
 
-    cp mito_out/get_org.log.txt ${meta.id}.mito.log.txt
+    if [ -f mito_out/get_org.log.txt ]; then
+        cp mito_out/get_org.log.txt ${meta.id}.mito.log.txt
+    else
+        printf "GetOrganelle exited with status %s before writing get_org.log.txt\\n" "\$status" > ${meta.id}.mito.log.txt
+    fi
 
-    # GetOrganelle's success output filename varies (path_sequence.fasta,
-    # complete.fasta, scaffolds.fasta…). Take whatever fasta it produced.
-    found=\$(ls mito_out/*path_sequence*.fasta mito_out/*scaffolds*.fasta mito_out/*complete*.fasta 2>/dev/null | head -1 || true)
+    # GetOrganelle's documented final FASTA output is path_sequence.fasta.
+    # Multiple files can represent alternative graph paths; annotate the first
+    # deterministically and record the count in the report summary.
+    if [ -d mito_out ]; then
+        path_count=\$(find mito_out -maxdepth 1 -type f -name '*path_sequence*.fasta' | sort | wc -l | awk '{print \$1}')
+        found=\$(find mito_out -maxdepth 1 -type f -name '*path_sequence*.fasta' | sort | head -1 || true)
+    else
+        path_count=0
+        found=""
+    fi
     if [ -n "\$found" ]; then
         cp "\$found" ${meta.id}.mito.fasta
     fi
+
+    if [ -f ${meta.id}.mito.fasta ]; then
+        status_label="ok"
+        seq_count=\$(grep -c '^>' ${meta.id}.mito.fasta || true)
+        total_bp=\$(awk 'BEGIN{n=0} /^>/{next} {gsub(/[[:space:]]/, ""); n+=length(\$0)} END{print n+0}' ${meta.id}.mito.fasta)
+        longest_bp=\$(awk 'BEGIN{m=0;n=0} /^>/{if(n>m)m=n; n=0; next} {gsub(/[[:space:]]/, ""); n+=length(\$0)} END{if(n>m)m=n; print m+0}' ${meta.id}.mito.fasta)
+        topology=\$(grep '^>' ${meta.id}.mito.fasta | grep -qi circular && printf circular || printf unknown)
+    else
+        status_label="no_fasta"
+        seq_count=0
+        total_bp=0
+        longest_bp=0
+        topology="NA"
+    fi
+
+cat > ${meta.id}.getorganelle_mqc.tsv <<EOF
+# id: "getorganelle_mitogenome"
+# section_name: "Mitogenome assembly"
+# description: "GetOrganelle mitochondrial FASTA summary."
+# plot_type: "table"
+Sample	Status	Sequences	Total_bp	Longest_bp	Topology	Path_FASTAs
+${meta.id}	\$status_label	\$seq_count	\$total_bp	\$longest_bp	\$topology	\$path_count
+EOF
+
+    exit 0
     """
 }
 
@@ -83,8 +124,9 @@ workflow MITO {
         // User supplied a pre-downloaded DB.
         db_ch = Channel.value(tuple(params.organelle_type, file(params.organelle_db, checkIfExists: true)))
     } else {
-        MITO_DB(Channel.value(params.organelle_type))
-        db_ch = MITO_DB.out
+        db_req_ch = reads_ch.map { meta, reads -> params.organelle_type }.first()
+        MITO_DB(db_req_ch)
+        db_ch = MITO_DB.out.collect(flat: false).map { it[0] }
     }
 
     MITOGENOME(reads_ch, db_ch)
@@ -92,4 +134,5 @@ workflow MITO {
     emit:
     fasta   = MITOGENOME.out.fasta
     logfile = MITOGENOME.out.logfile
+    summary = MITOGENOME.out.summary
 }

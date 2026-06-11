@@ -1,8 +1,7 @@
 // De novo assembly of short reads with MEGAHIT.
 // MEGAHIT is fast and memory-frugal; --presets meta-sensitive matches the
-// host + microbial mixture typical of genome-skim data (Mateo's production
-// script). The output dir must NOT pre-exist, which a fresh Nextflow task dir
-// guarantees.
+// host + microbial mixture typical of genome-skim data. The output dir must
+// NOT pre-exist, which a fresh Nextflow task dir guarantees.
 
 process ASSEMBLY {
     tag "${meta.id}"

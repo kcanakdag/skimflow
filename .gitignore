@@ -2,4 +2,6 @@ work/
 results/
 .nextflow*
 *.sif
+.env
+gurobi.lic
 test_data/*.fastq.gz

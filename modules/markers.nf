@@ -67,8 +67,9 @@ workflow MARKER_EXTRACTION {
     if (params.busco_db) {
         db_ch = Channel.value(tuple(params.busco_lineage, file(params.busco_db, checkIfExists: true)))
     } else {
-        BUSCO_DB(Channel.value(params.busco_lineage))
-        db_ch = BUSCO_DB.out
+        db_req_ch = contigs_ch.map { meta, contigs -> params.busco_lineage }.first()
+        BUSCO_DB(db_req_ch)
+        db_ch = BUSCO_DB.out.collect(flat: false).map { it[0] }
     }
 
     MARKERS(contigs_ch, db_ch)
