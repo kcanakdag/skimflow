@@ -3,6 +3,11 @@
 #
 #   apptainer build respect_0.2.sif containers/respect/respect.def
 #
+# This MUST stay in lockstep with containers/respect/Containerfile (the podman
+# build). Both install RESPECT from its GitHub source plus gurobipy from PyPI;
+# RESPECT has no PyPI release and the `respect` package on PyPI / bioconda is a
+# different, unrelated tool, so do not switch this to a conda install.
+#
 # Mount the Gurobi licence at run time:
 #   apptainer exec --bind $HOME/gurobi.lic:/opt/gurobi/gurobi.lic respect_0.2.sif \
 #       respect -i reads_dir -o out_dir
@@ -12,16 +17,31 @@
 #   params.respect_container = 'respect_0.2.sif'
 
 Bootstrap: docker
-From: mambaorg/micromamba:1.5.10
+From: python:3.8-slim
+
+%labels
+    org.opencontainers.image.source https://github.com/shahab-sarmashghi/RESPECT
+    maintainer skimflow pipeline
 
 %post
-    micromamba install -y -n base -c conda-forge -c bioconda \
-        respect gurobi python=3.11
-    micromamba clean --all --yes
+    # Jellyfish is RESPECT's k-mer counter; build-essential covers C/C++ deps
+    # gurobipy may compile against; git installs RESPECT from GitHub source.
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        jellyfish \
+        seqtk \
+        build-essential \
+        git \
+        procps
+    rm -rf /var/lib/apt/lists/*
+
+    pip install --no-cache-dir \
+        git+https://github.com/shahab-sarmashghi/RESPECT.git \
+        gurobipy
 
 %environment
-    export PATH=/opt/conda/bin:$PATH
-    export MAMBA_DOCKERFILE_ACTIVATE=1
+    # Gurobi looks here automatically; override by binding a licence elsewhere
+    # and exporting GRB_LICENSE_FILE.
     export GRB_LICENSE_FILE=/opt/gurobi/gurobi.lic
 
 %runscript
