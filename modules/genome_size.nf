@@ -24,9 +24,14 @@ process RESPECT {
     container "${params.respect_container ?: 'local/respect:0.2'}"
     publishDir "${params.outdir}/genome_size", mode: 'copy', saveAs: { fn -> "${meta.id}/${fn}" }
 
-    cpus 4
-    memory '8 GB'
-    time '2h'
+    cpus 8
+    // Full-size skim libraries (multi-GB) overflow a fixed 8 GB during k-mer
+    // counting and get OOM-killed. Start at the scc-cpu node ratio (8 cores x
+    // 2 GB/core = 16 GB) and scale with attempt (16 -> 32 -> 48 -> 64 GB) so the
+    // GWDG OOM-retry (exit 137) recovers without hoarding memory up front.
+    memory { 16.GB * task.attempt }
+    time '4h'
+    maxRetries 3
 
     input:
     tuple val(meta), path(reads)

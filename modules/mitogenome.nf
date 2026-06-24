@@ -34,13 +34,23 @@ process MITOGENOME {
     container 'quay.io/biocontainers/getorganelle:1.7.7.1--pyhdfd78af_0'
     publishDir "${params.outdir}/mitogenome", mode: 'copy', saveAs: { fn -> "${meta.id}/${fn}" }
 
-    cpus 4
-    memory '6 GB'
+    cpus 8
+    // GetOrganelle runs SPAdes internally; on full-size libraries a fixed 6 GB
+    // gets OOM-killed. Start at 8 cores x 2 GB/core = 16 GB (the scc-cpu node
+    // ratio) and scale with attempt (16 -> 32 -> 48 -> 64 GB) so the GWDG
+    // OOM-retry recovers instead of dropping the mitogenome.
+    memory { 16.GB * task.attempt }
     time '4h'
+    maxRetries 3
 
     // GetOrganelle can return non-zero when it cannot finish the assembly
     // (e.g. too few mitochondrial reads). Capture that in a summary instead
     // of taking down the rest of the run.
+    //
+    // On OOM (exit 137, see the kill-signal guard in the script) retry with
+    // the next memory tier; once retries are spent, ignore so one stubborn
+    // sample can't abort the whole batch.
+    errorStrategy { task.attempt <= 3 && (task.exitStatus in 130..143) ? 'retry' : 'ignore' }
 
     input:
     tuple val(meta),  path(reads)
@@ -67,6 +77,17 @@ process MITOGENOME {
         -R 10
     status=\$?
     set -e
+
+    # If GetOrganelle was killed by a signal (e.g. the OOM-killer: SIGKILL ->
+    # exit 137), propagate it so Nextflow's memory-scaling retry kicks in.
+    # Without this the 'exit 0' below would mask the OOM as an empty success,
+    # which also poisons -resume (a no_fasta result gets cached as done).
+    # Genuine GetOrganelle errors (too few reads -> small exit codes) fall
+    # through and are tolerated as an empty result.
+    if [ "\$status" -ge 128 ]; then
+        echo "GetOrganelle killed by signal (exit \$status), likely OOM; failing task to trigger retry" >&2
+        exit "\$status"
+    fi
 
     if [ -f mito_out/get_org.log.txt ]; then
         cp mito_out/get_org.log.txt ${meta.id}.mito.log.txt

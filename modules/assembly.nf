@@ -10,7 +10,10 @@ process ASSEMBLY {
 
     cpus 16
     memory '32 GB'
-    time '4h'
+    // MEGAHIT's meta-sensitive preset runs the full k-ladder (k=21..141);
+    // larger genomes (~1 Gbp skim) exceed 4 h and get wall-clock-killed
+    // (exit 140). scc-cpu allows up to 48 h; 24 h gives ample headroom.
+    time '24h'
 
     input:
     tuple val(meta), path(reads)
