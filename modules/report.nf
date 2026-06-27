@@ -16,6 +16,7 @@ process REPORT {
     path busco_summaries,   stageAs: 'busco/*'
     path kraken_reports,    stageAs: 'kraken/*'
     path mitogenome_summaries, stageAs: 'mitogenome/*'
+    path gene_summaries,    stageAs: 'genes/*'
 
     output:
     path 'multiqc_report.html',          emit: html
@@ -27,13 +28,14 @@ process REPORT {
     # input file; if a step was skipped (e.g. --skip_respect) or all its tasks
     # failed-ignored (mito/markers on tiny test data), the dir is absent and
     # multiqc bails out. Create empty placeholders to keep the CLI uniform.
-    mkdir -p qc genome_size busco kraken mitogenome
+    mkdir -p qc genome_size busco kraken mitogenome genes
 cat > multiqc_config.yaml <<'EOF'
 custom_content:
   order:
     - getorganelle_mitogenome
     - mitoz_annotation
     - mitos2_annotation
+    - mito_gene_occupancy
 EOF
 
     multiqc \\
@@ -41,6 +43,6 @@ EOF
         --config multiqc_config.yaml \\
         --filename multiqc_report.html \\
         --title 'skimflow' \\
-        qc genome_size busco kraken mitogenome
+        qc genome_size busco kraken mitogenome genes
     """
 }

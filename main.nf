@@ -10,6 +10,7 @@ include { LR_QC }                 from './modules/long_read_qc.nf'
 include { FLYE }                  from './modules/flye.nf'
 include { MITO }                  from './modules/mitogenome.nf'
 include { MITOGENOME_ANNOTATION } from './modules/mitogenome_annotation.nf'
+include { MITO_GENES }            from './modules/mito_genes.nf'
 include { MARKER_EXTRACTION }     from './modules/markers.nf'
 include { REPORT }                from './modules/report.nf'
 
@@ -168,6 +169,9 @@ workflow {
         .collect()
         .ifEmpty([])
 
+    MITO_GENES(MITOGENOME_ANNOTATION.out.mitos2_dir)
+    gene_summary_ch = MITO_GENES.out.summary.collect().ifEmpty([])
+
     if (params.skip_respect) {
         genome_size_ch = Channel.empty().collect().ifEmpty([])
     } else {
@@ -188,5 +192,6 @@ workflow {
         MARKER_EXTRACTION.out.summary.map { meta, f -> f }.collect().ifEmpty([]),
         kraken_report_ch,
         mitogenome_summary_ch,
+        gene_summary_ch,
     )
 }

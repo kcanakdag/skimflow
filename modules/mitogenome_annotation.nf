@@ -258,5 +258,6 @@ workflow MITOGENOME_ANNOTATION {
     MITOS2_ANNOTATE(mito_fasta_ch, mitos2_refdir_ch)
 
     emit:
-    summary = MITOZ_ANNOTATE.out.summary.mix(MITOS2_ANNOTATE.out.summary)
+    summary    = MITOZ_ANNOTATE.out.summary.mix(MITOS2_ANNOTATE.out.summary)
+    mitos2_dir = MITOS2_ANNOTATE.out.dir
 }
