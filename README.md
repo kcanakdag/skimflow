@@ -9,7 +9,8 @@ From paired-end (or single-end) Illumina skim reads, skimflow produces:
 - **Trimmed reads** with fastp
 - **Genome size + coverage estimate** with RESPECT (the "is this data good enough?" gate)
 - **De novo assembly** with MEGAHIT (short reads) or Flye (long reads)
-- **Mitogenome** with GetOrganelle
+- **Mitogenome** with GetOrganelle, annotated with MitoZ and MITOS2
+- **Per-gene mitochondrial multi-FASTAs** harvested from each sample's MITOS2 annotation and pooled across all samples into one file per gene (e.g. `COX1.fasta` with every species' COX1), plus a gene-occupancy matrix for downstream phylogenetics
 - **BUSCO marker scores** against the chosen lineage
 - **One-page MultiQC HTML report** that summarises everything above
 
@@ -286,6 +287,7 @@ results/
 ├── assembly/<sample>/       MEGAHIT (short) or Flye (long) contigs
 ├── mitogenome/<sample>/     GetOrganelle FASTA + log (short-read samples)
 ├── mitogenome_annotation/   MitoZ / MITOS2 annotation outputs
+├── genes/                   per-gene mito multi-FASTAs pooled across samples + occupancy matrix
 ├── markers/<sample>/        BUSCO short_summary + full output
 └── report/                  multiqc_report.html
 ```
@@ -314,6 +316,34 @@ Annotation output is:
 - `results/report/multiqc_report.html` includes mitogenome assembly and
   annotation summary tables.
 
+### Per-gene mitochondrial harvest
+
+After MITOS2 annotates each sample, skimflow harvests the individual
+mitochondrial genes (13 protein-coding genes plus the `16S` and `12S` rRNAs)
+and pools them across every sample into one multi-FASTA per gene. This is the
+input shape phylogenetics wants, and it stays useful even when a full
+mitogenome assembly is too fragmentary to use directly.
+
+- `results/genes/nt/<GENE>.fasta` is the nucleotide alignment input for one
+  gene, with one record per sample that has it (e.g. `COX1.fasta` holds every
+  species' COX1). Records are labelled by species; when two samples share a
+  species label the sample id is appended to keep headers unique.
+- `results/genes/aa/<GENE>.faa` is the matching amino-acid file for each
+  protein-coding gene (no file for the rRNAs).
+- `results/genes/occupancy.tsv` is the gene-by-sample matrix: the harvested
+  nucleotide length per gene per sample (`0` where a gene is absent), with
+  `species` and `flags` columns alongside. The MultiQC report shows the same
+  matrix as its "Mito gene occupancy" section, there rendering absent genes as
+  blank cells.
+- `results/genes/per_sample/<sample>/` keeps each sample's own harvested gene
+  FASTAs and occupancy row before pooling.
+
+Harvest runs per sample with `errorStrategy 'ignore'`, so a sample MITOS2 could
+not annotate simply contributes nothing rather than aborting the batch. With
+near-zero-coverage test data no genes are harvested and the aggregator still
+emits a header-only `occupancy.tsv`; real data is where this step produces
+sequence.
+
 ## Tools
 
 | Step | Tool |
@@ -325,6 +355,7 @@ Annotation output is:
 | Long-read QC + assembly | Filtlong + Flye |
 | Mitogenome | GetOrganelle |
 | Mitogenome annotation | MitoZ / MITOS2 |
+| Per-gene mito harvest | MITOS2-annotation parser (bundled scripts) |
 | Markers | BUSCO |
 | Report | MultiQC |
 

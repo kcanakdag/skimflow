@@ -5,3 +5,5 @@ results/
 .env
 gurobi.lic
 test_data/*.fastq.gz
+__pycache__/
+*.pyc
