@@ -34,6 +34,21 @@ def read_fasta(path):
     return out
 
 
+def collision_headers(seqs_dir, stem):
+    """Return the set of headers that map to more than one distinct sample for
+    this gene stem across BOTH .fna and .faa files, so nt and aa outputs always
+    apply identical collision suffixing."""
+    samples_by_header = {}
+    if os.path.isdir(seqs_dir):
+        for f in sorted(os.listdir(seqs_dir)):
+            if gene_of(f) != stem or not (f.endswith('.fna') or f.endswith('.faa')):
+                continue
+            sample = sample_of(f)
+            for header, _seq in read_fasta(os.path.join(seqs_dir, f)):
+                samples_by_header.setdefault(header, set()).add(sample)
+    return {h for h, s in samples_by_header.items() if len(s) > 1}
+
+
 def aggregate_ext(seqs_dir, ext, outdir):
     files = []
     if os.path.isdir(seqs_dir):
@@ -46,16 +61,14 @@ def aggregate_ext(seqs_dir, ext, outdir):
         group = by_gene.get(stem, [])
         if not group:
             continue
+        collide = collision_headers(seqs_dir, stem)
         records = []  # [header, seq, sample]
         for f in group:
             sample = sample_of(f)
             for header, seq in read_fasta(os.path.join(seqs_dir, f)):
                 records.append([header, seq, sample])
-        counts = {}
         for rec in records:
-            counts[rec[0]] = counts.get(rec[0], 0) + 1
-        for rec in records:
-            if counts[rec[0]] > 1:
+            if rec[0] in collide:
                 rec[0] = '%s__%s' % (rec[0], rec[2])
         out_name = '%s.fasta' % stem if ext == '.fna' else '%s.faa' % stem
         with open(os.path.join(outdir, out_name), 'w') as fh:

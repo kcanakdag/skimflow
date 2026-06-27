@@ -78,6 +78,63 @@ class TestAggregate(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(out, 'occupancy.tsv')))
             self.assertTrue(os.path.exists(os.path.join(out, 'mito_genes_occupancy_mqc.tsv')))
 
+    def test_asymmetric_nt_aa_collision(self):
+        """Regression: sample A has nt+aa, sample B has nt only.
+        Both share species header >Syllis_okadai for COX1.
+        Both nt and aa outputs must suffix sample A's header consistently."""
+        with tempfile.TemporaryDirectory() as root:
+            seqs = os.path.join(root, 'seqs')
+            occ = os.path.join(root, 'occ')
+            # sample A: nt and aa present
+            write(os.path.join(seqs, 'COX1__A.fna'), '>Syllis_okadai\nAAAA\n')
+            write(os.path.join(seqs, 'COX1__A.faa'), '>Syllis_okadai\nMK\n')
+            # sample B: nt only, no aa
+            write(os.path.join(seqs, 'COX1__B.fna'), '>Syllis_okadai\nCCCC\n')
+            write(os.path.join(occ, 'dummy.occupancy.tsv'),
+                  'sample\tspecies\tgene\tlen_nt\tlen_aa\tflags\n')
+            out = os.path.join(root, 'out')
+            subprocess.run(
+                [sys.executable, os.path.join(BIN, 'aggregate_mito_genes.py'),
+                 '--seqs-dir', seqs, '--occ-dir', occ, '--outdir', out],
+                check=True)
+            with open(os.path.join(out, 'nt', 'COX1.fasta')) as fh:
+                nt = fh.read()
+            with open(os.path.join(out, 'aa', 'COX1.faa')) as fh:
+                aa = fh.read()
+            # nt must have both records, both suffixed
+            self.assertIn('>Syllis_okadai__A', nt)
+            self.assertIn('>Syllis_okadai__B', nt)
+            # aa must also suffix sample A -- key regression assertion
+            self.assertIn('>Syllis_okadai__A', aa,
+                          'aa header must be suffixed to match nt; got: %r' % aa)
+            self.assertNotIn('>Syllis_okadai\n', aa,
+                             'bare header in aa would diverge from nt suffix')
+
+    def test_no_collision_no_suffix(self):
+        """Two samples with DISTINCT species headers must not gain any __ suffix."""
+        with tempfile.TemporaryDirectory() as root:
+            seqs = os.path.join(root, 'seqs')
+            occ = os.path.join(root, 'occ')
+            write(os.path.join(seqs, 'COX1__A.fna'), '>Syllis_okadai\nAAAA\n')
+            write(os.path.join(seqs, 'COX1__A.faa'), '>Syllis_okadai\nMK\n')
+            write(os.path.join(seqs, 'COX1__B.fna'), '>Syllis_gracilis\nCCCC\n')
+            write(os.path.join(seqs, 'COX1__B.faa'), '>Syllis_gracilis\nML\n')
+            write(os.path.join(occ, 'dummy.occupancy.tsv'),
+                  'sample\tspecies\tgene\tlen_nt\tlen_aa\tflags\n')
+            out = os.path.join(root, 'out')
+            subprocess.run(
+                [sys.executable, os.path.join(BIN, 'aggregate_mito_genes.py'),
+                 '--seqs-dir', seqs, '--occ-dir', occ, '--outdir', out],
+                check=True)
+            with open(os.path.join(out, 'nt', 'COX1.fasta')) as fh:
+                nt = fh.read()
+            with open(os.path.join(out, 'aa', 'COX1.faa')) as fh:
+                aa = fh.read()
+            for line in (nt + aa).splitlines():
+                if line.startswith('>'):
+                    self.assertNotIn('__', line,
+                                     'no suffix expected for distinct headers; got: %r' % line)
+
 
 if __name__ == '__main__':
     unittest.main()
