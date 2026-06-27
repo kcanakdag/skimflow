@@ -104,6 +104,15 @@ class TestCli(unittest.TestCase):
                 text = fh.read()
             self.assertIn('merged_fragments', text)
             self.assertIn('internal_stop', text)
+            # Verify occupancy TSV structure
+            lines = text.splitlines()
+            self.assertEqual(lines[0], 'sample\tspecies\tgene\tlen_nt\tlen_aa\tflags')
+            self.assertEqual(len(lines), 16)  # 1 header + 15 genes
+            expected_genes = {'COX1', 'COX2', 'COX3', 'COB', 'NAD1', 'NAD2', 'NAD3', 'NAD4',
+                              'NAD4L', 'NAD5', 'NAD6', 'ATP6', 'ATP8', '16S', '12S'}
+            for line in lines[1:]:
+                fields = line.split('\t')
+                self.assertIn(fields[2], expected_genes)
 
 
 if __name__ == '__main__':

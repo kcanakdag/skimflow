@@ -198,8 +198,16 @@ def main(argv=None):
 
     fas = find_result(args.mitos_dir, 'result.fas')
     faa = find_result(args.mitos_dir, 'result.faa')
-    nt_records = list(parse_mitos_fasta(open(fas).read())) if fas else []
-    aa_records = list(parse_mitos_fasta(open(faa).read())) if faa else []
+    if fas:
+        with open(fas) as fh:
+            nt_records = list(parse_mitos_fasta(fh.read()))
+    else:
+        nt_records = []
+    if faa:
+        with open(faa) as fh:
+            aa_records = list(parse_mitos_fasta(fh.read()))
+    else:
+        aa_records = []
 
     nt_features = select_features(nt_records)
     aa_seqs = select_aa(nt_features, aa_records)
