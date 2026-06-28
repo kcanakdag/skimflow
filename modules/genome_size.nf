@@ -25,11 +25,13 @@ process RESPECT {
     publishDir "${params.outdir}/genome_size", mode: 'copy', saveAs: { fn -> "${meta.id}/${fn}" }
 
     cpus 8
-    // Full-size skim libraries (multi-GB) overflow a fixed 8 GB during k-mer
-    // counting and get OOM-killed. Start at the scc-cpu node ratio (8 cores x
-    // 2 GB/core = 16 GB) and scale with attempt (16 -> 32 -> 48 -> 64 GB) so the
-    // GWDG OOM-retry (exit 137) recovers without hoarding memory up front.
-    memory { 16.GB * task.attempt }
+    // Full-size skim libraries (multi-GB) overflow a small heap during k-mer
+    // counting and get OOM-killed. Start at 32 GB (8 cores x 4 GB/core on the
+    // scc-cpu node) and scale with attempt (32 -> 64 -> 96 -> 128 GB). The
+    // script below re-exits 137 on a swallowed count OOM so this scaling
+    // actually engages via the GWDG retry (exit 130..143); without that guard
+    // RESPECT's plain exit-1 masks the OOM and the retry never fires.
+    memory { 32.GB * task.attempt }
     time '4h'
     maxRetries 3
 
@@ -64,13 +66,32 @@ process RESPECT {
     #                  always writes alongside the .gz, which is what we
     #                  want with Nextflow staging.
     #  --threads N     RESPECT-level worker count (one per input file).
+    # Run RESPECT capturing its full output. RESPECT swallows a fatal jellyfish
+    # k-mer-count failure (e.g. an OOM-kill of the count subprocess): it logs
+    # "it's skipped", drops the input, then exits 1 once every input was skipped
+    # ("Number of processes must be at least 1"). That plain exit-1 hides the
+    # underlying OOM, so the GWDG memory-scaling retry (which only fires on exit
+    # 130..143) never engages and one large library aborts the whole gated
+    # pipeline. Detect that signature and re-exit 137 so the retry kicks in at
+    # the next memory tier. Same swallowed-OOM trap we guard in GetOrganelle.
+    rc=0
     OMP_NUM_THREADS=${task.cpus} \\
     respect \\
         --debug \\
         --threads ${task.cpus} \\
         --decomp gzip \\
         -d respect_in \\
-        -o respect_out
+        -o respect_out > respect_run.log 2>&1 || rc=\$?
+    cat respect_run.log
+
+    if [ "\$rc" -ne 0 ]; then
+        if grep -qiE "it.s skipped|Number of processes must be at least 1|Killed|MemoryError|bad_alloc|Cannot allocate memory" respect_run.log; then
+            echo "[genome_size] RESPECT exit \$rc with a skipped-input/OOM signature -> re-exiting 137 so the GWDG memory-scaling retry engages" >&2
+            exit 137
+        fi
+        echo "[genome_size] RESPECT exit \$rc with no OOM signature -> propagating failure" >&2
+        exit \$rc
+    fi
 
     # RESPECT writes estimated-parameters.txt: tab-separated, header row
     # then one row per input. Columns include:
