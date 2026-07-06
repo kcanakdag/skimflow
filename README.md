@@ -41,7 +41,7 @@ visible on the cluster; absolute paths are safest for the one-liner.
 ```bash
 ssh u<youruser>@glogin-p3.hpc.gwdg.de
 # NHR standard96: ssh u<youruser>@glogin.hpc.gwdg.de
-# NHR standard96s: ssh u<youruser>@glogin-p3.hpc.gwdg.de
+# NHR standard96s: ssh u<youruser>@glogin-p2.hpc.gwdg.de
 ```
 
 Before the first run, save your Gurobi WLS licence (free academic licence from
@@ -172,6 +172,7 @@ Common Nextflow-only overrides:
 | Flag | Meaning |
 | --- | --- |
 | `--outdir DIR` | Results directory, default `results/`. |
+| `--save_trimmed_reads` | Publish fastp's trimmed FASTQs under `read_qc/`; off by default (large intermediates). |
 | `--busco_lineage NAME` | BUSCO lineage, default `metazoa_odb10`. |
 | `--busco_db DIR` | Existing BUSCO download directory. |
 | `--organelle_type NAME` | GetOrganelle target, default `animal_mt`. |
@@ -280,7 +281,7 @@ Everything lands under `results/`:
 
 ```
 results/
-├── qc/<sample>/             fastp JSON + trimmed reads
+├── read_qc/                 fastp JSON + HTML (trimmed reads only with --save_trimmed_reads)
 ├── decontam/<sample>/       kraken2 cleaned reads + report (when --kraken2_db is set)
 ├── genome_size/<sample>/    RESPECT estimates
 ├── long_read_qc/<sample>/   Filtlong-filtered reads (long-read samples)
