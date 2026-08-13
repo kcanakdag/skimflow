@@ -56,6 +56,15 @@ process MITOZ_ANNOTATE {
     """
     set -euo pipefail
 
+    # The guanliangmeng/mitoz image installs mitoz into a conda env whose bin
+    # dir (/app/anaconda/envs/mitoz3.6/bin) is exposed only via the Docker image
+    # PATH. Podman/Docker apply that PATH, but Apptainer on GWDG (run with
+    # --cleanenv) does not, so `mitoz` is not found and every task exits 127.
+    # Prepend the env bin dir so mitoz resolves on every engine. Harmless under
+    # podman, where the dir is already first on PATH. Pinned to the mitoz:3.6
+    # tag; update alongside params.mitoz_container.
+    export PATH="/app/anaconda/envs/mitoz3.6/bin:\$PATH"
+
     topo="${params.mitogenome_topology}"
     case "\$topo" in
         auto|linear|circular) ;;
