@@ -4,6 +4,7 @@ results/
 *.sif
 .env
 gurobi.lic
-test_data/*.fastq.gz
+test_data/
+docs/
 __pycache__/
 *.pyc
