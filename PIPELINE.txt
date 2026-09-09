@@ -83,7 +83,7 @@ Steps and tools
               (target) reads as the clean set feeding the steps below
 
 3. GENOME_SIZE               modules/genome_size.nf
-   Tool:      RESPECT (Sayyari et al. 2022)
+   Tool:      RESPECT (Sarmashghi et al. 2021, PLOS Comput Biol)
    Container: local/respect:0.2  (custom, built from
               containers/respect/Containerfile, see below)
    Skip:      --skip_respect (also implicit for long-read-only runs)

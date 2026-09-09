@@ -74,4 +74,5 @@ workflow MITO_GENES {
     summary = GENE_AGGREGATE.out.summary
     nt      = GENE_AGGREGATE.out.nt
     aa      = GENE_AGGREGATE.out.aa
+    matrix  = GENE_AGGREGATE.out.matrix
 }

@@ -1,6 +1,7 @@
 // Final per-run report. MultiQC scrapes its supported upstream outputs
-// (fastp.json, RESPECT summary, BUSCO short_summary, kraken2 reports, and
-// skimflow mitogenome custom-content summaries) and rolls them into one HTML.
+// (fastp.json, RESPECT summary, BUSCO short_summary, kraken2 reports, and the
+// skimflow custom-content summaries: mitogenome, annotation, gene occupancy,
+// per-sample metrics, and phylogeny) and rolls them into one HTML.
 
 process REPORT {
     tag 'multiqc'
@@ -17,6 +18,7 @@ process REPORT {
     path kraken_reports,    stageAs: 'kraken/*'
     path mitogenome_summaries, stageAs: 'mitogenome/*'
     path gene_summaries,    stageAs: 'genes/*'
+    path extra_summaries,   stageAs: 'extra/*'
 
     output:
     path 'multiqc_report.html',          emit: html
@@ -28,14 +30,19 @@ process REPORT {
     # input file; if a step was skipped (e.g. --skip_respect) or all its tasks
     # failed-ignored (mito/markers on tiny test data), the dir is absent and
     # multiqc bails out. Create empty placeholders to keep the CLI uniform.
-    mkdir -p qc genome_size busco kraken mitogenome genes
+    mkdir -p qc genome_size busco kraken mitogenome genes extra
 cat > multiqc_config.yaml <<'EOF'
 custom_content:
   order:
+    - skimflow_metrics
     - getorganelle_mitogenome
     - mitoz_annotation
     - mitos2_annotation
     - mito_gene_occupancy
+    - phylogeny_nt
+    - phylogeny_nt_tree
+    - phylogeny_aa
+    - phylogeny_aa_tree
 EOF
 
     multiqc \\
@@ -43,6 +50,6 @@ EOF
         --config multiqc_config.yaml \\
         --filename multiqc_report.html \\
         --title 'skimflow' \\
-        qc genome_size busco kraken mitogenome genes
+        qc genome_size busco kraken mitogenome genes extra
     """
 }

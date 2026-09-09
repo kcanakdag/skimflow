@@ -1,6 +1,6 @@
 // Genome-size + coverage estimation with RESPECT.
 //
-// RESPECT (Sayyari et al. 2022, Bioinformatics) is a k-mer-based estimator
+// RESPECT (Sarmashghi et al. 2021, PLOS Comput Biol) is a k-mer-based estimator
 // designed specifically for low-coverage skim data. From a single FASTQ
 // pair it produces:
 //   - genome_length         : haploid genome size (bp)

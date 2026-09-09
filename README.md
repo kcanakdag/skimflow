@@ -11,7 +11,9 @@ From paired-end (or single-end) Illumina skim reads, skimflow produces:
 - **De novo assembly** with MEGAHIT (short reads) or Flye (long reads)
 - **Mitogenome** with GetOrganelle, annotated with MitoZ and MITOS2
 - **Per-gene mitochondrial multi-FASTAs** harvested from each sample's MITOS2 annotation and pooled across all samples into one file per gene (e.g. `COX1.fasta` with every species' COX1), plus a gene-occupancy matrix for downstream phylogenetics
+- **Phylogenetic trees** with MAFFT + trimAl + IQ-TREE: each mito gene is aligned and trimmed, then concatenated into a partitioned supermatrix for a maximum-likelihood species tree (both nucleotide and amino-acid, plus optional per-gene trees)
 - **BUSCO marker scores** against the chosen lineage
+- **Per-sample metrics table** (`summary/skimflow_metrics.csv`) joining read QC, genome size, assembly stats, mitogenome length, gene occupancy, and BUSCO into one row per sample
 - **One-page MultiQC HTML report** that summarises everything above
 
 ## Quick start
@@ -125,7 +127,7 @@ For multiple samples, use a CSV with one row per sample:
 
 ```
 sample_id,fastq_1,fastq_2,species_id,expected_genome_size_bp
-demo,reads/demo_R1.fastq.gz,reads/demo_R2.fastq.gz,Bostrychus_sinensis,1000000000
+demo,test_data/demo_R1.fastq.gz,test_data/demo_R2.fastq.gz,Bostrychus_sinensis,1000000000
 ```
 
 - Empty `fastq_2` → single-end mode.
@@ -180,11 +182,20 @@ Common Nextflow-only overrides:
 | `--mitoz_clade NAME` | MitoZ clade, default `Arthropoda`. |
 | `--mitoz_genetic_code N` | MitoZ mitochondrial genetic code, default `5`. |
 | `--mitos2_genetic_code N` | MITOS2 mitochondrial genetic code, default `5`. |
+| `--mitos2_refseqver NAME` | MITOS2 reference database version, default `refseq89m`. |
+| `--mitos2_extra_args STR` | Extra flags passed to `runmitos`, default `--noplots`. |
 | `--mitogenome_topology auto|linear|circular` | Topology hint for MitoZ/MITOS2, default `auto`. |
 | `--flye_mode FLAG` | Override Flye mode, e.g. `--nano-raw` or `--pacbio-hifi`. |
 | `--filtlong_min_length N` | Filtlong minimum read length, default `1000`. |
 | `--filtlong_keep_percent N` | Filtlong retained-read percentage, default `90`. |
 | `--megahit_preset NAME` | MEGAHIT preset, default `meta-sensitive`. |
+| `--skip_phylo` | Skip the MAFFT/trimAl/IQ-TREE phylogeny stage. |
+| `--phylo_gene_trees false` | Build only the supermatrix tree, not the per-gene trees; default `true`. |
+| `--phylo_min_taxa_per_gene N` | Drop a gene aligned in fewer than N samples, default `4`. |
+| `--mafft_args STR` | MAFFT flags, default `--auto`. |
+| `--trimal_mode NAME` | trimAl method (`automated1`, `gappyout`, `strict`, ...), default `automated1`. |
+| `--iqtree_bootstrap N` | IQ-TREE UFBoot replicates, default `1000`. |
+| `--iqtree_alrt N` | IQ-TREE SH-aLRT replicates, default `1000`. |
 
 ## Optional steps
 
@@ -275,6 +286,53 @@ On GWDG, pass overrides as extra Nextflow arguments after `--`:
     --mitos2_genetic_code 2
 ```
 
+### Phylogenetics (MAFFT / trimAl / IQ-TREE)
+
+The harvested per-gene FASTAs feed a phylogenetics stage that runs by default
+(disable with `--skip_phylo`). Each gene is aligned with MAFFT and trimmed with
+trimAl on its own (whole-mitogenome alignment is avoided because gene order
+varies across annelids and the control region is unalignable), then the trimmed
+alignments are concatenated into a partitioned supermatrix and a maximum-
+likelihood species tree is built with IQ-TREE (ModelFinder per partition,
+`-B` ultrafast bootstrap, `-alrt` SH-aLRT). Both sequence types run: nucleotide
+(13 PCG + 2 rRNA) and amino acid (13 PCG). Per-gene trees are also built unless
+`--phylo_gene_trees false`.
+
+The stage is fail-soft: any tree with fewer than four taxa is skipped rather
+than aborting the run, so small or low-coverage batches still complete. Open the
+resulting `.treefile` in FigTree or iTOL. Common overrides:
+
+```bash
+nextflow run . -profile podman --input my.csv \
+    --trimal_mode gappyout \
+    --iqtree_bootstrap 1000 \
+    --phylo_min_taxa_per_gene 4
+```
+
+### Coverage-titration benchmark
+
+`benchmarks/run_titration.sh` down-samples one high-coverage sample to a ladder
+of target coverages (rasusa, several seeds each), runs the full pipeline at
+every level, and collects each level's `summary/skimflow_metrics.csv` row into
+one `titration.csv`. Use it to find the minimum skim depth for reliable
+mitogenome / gene recovery. It is a standalone helper (not a Nextflow entry) and
+runs rasusa inside the chosen container engine:
+
+```bash
+benchmarks/run_titration.sh \
+    --r1 test_data/pmisa_small_R1.fastq.gz \
+    --r2 test_data/pmisa_small_R2.fastq.gz \
+    --genome-size 1200000000 \
+    --coverages 0.05,0.1,0.25,0.5,1,2,5 --seeds 3 --engine podman \
+    --organelle-db results/mitogenome/getorganelle_db \
+    --busco-db results/markers/busco_downloads \
+    -- -resume
+```
+
+Pass `--organelle-db` / `--busco-db` (and `-- -resume`) so the reference
+databases are not re-downloaded for every level. `benchmarks/run_titration.sh --help`
+lists all options.
+
 ## Output layout
 
 Everything lands under `results/`:
@@ -285,12 +343,17 @@ results/
 ├── decontam/<sample>/       kraken2 cleaned reads + report (when --kraken2_db is set)
 ├── genome_size/<sample>/    RESPECT estimates
 ├── long_read_qc/<sample>/   Filtlong-filtered reads (long-read samples)
-├── assembly/<sample>/       MEGAHIT (short) or Flye (long) contigs
+├── assembly/<sample>/       MEGAHIT (short) or Flye (long) contigs + assembly_stats.tsv
 ├── mitogenome/<sample>/     GetOrganelle FASTA + log (short-read samples)
 ├── mitogenome_annotation/   MitoZ / MITOS2 annotation outputs
 ├── genes/                   per-gene mito multi-FASTAs pooled across samples + occupancy matrix
+├── phylogeny/{nt,aa}/       per-gene alignments/trims, gene trees, supermatrix + species tree
 ├── markers/<sample>/        BUSCO short_summary + full output
-└── report/                  multiqc_report.html
+├── summary/                 skimflow_metrics.csv (one row per sample, all stages)
+├── report/                  multiqc_report.html + multiqc_report_data/
+├── pipeline_report.html     Nextflow execution report (resources per task)
+├── pipeline_timeline.html   Nextflow timeline (shows the parallel fan-out)
+└── pipeline_trace.txt       Nextflow trace (per-task CPU/RAM/wall-clock; feeds benchmarking)
 ```
 
 GetOrganelle mitogenome output is:
@@ -345,18 +408,45 @@ near-zero-coverage test data no genes are harvested and the aggregator still
 emits a header-only `occupancy.tsv`; real data is where this step produces
 sequence.
 
+### Phylogeny output
+
+Under `results/phylogeny/`, one subtree per sequence type (`nt/` and `aa/`):
+
+- `<type>/alignments/<GENE>.aln.fasta` and `<type>/trimmed/<GENE>.trimmed.fasta`
+  are the MAFFT alignment and trimAl-trimmed alignment for each gene.
+- `<type>/gene_trees/<GENE>.treefile` is the per-gene ML tree (with `.iqtree`
+  report and `.contree`); a gene with fewer than four taxa gets a
+  `<GENE>.skipped.txt` instead.
+- `<type>/supermatrix.fasta` and `<type>/partitions.nex` are the concatenated
+  alignment and its per-gene partition file; `<type>/concat_stats.tsv` records
+  taxa/genes/length.
+- `<type>/<type>_species.treefile` is the partitioned supermatrix species tree
+  (with `.contree`, `.iqtree`, and run log). Open it in FigTree or iTOL.
+
+### Per-sample metrics
+
+`results/summary/skimflow_metrics.csv` has one row per sample joining read
+counts and %Q30 (fastp), RESPECT genome size + coverage, assembly contig stats
+(n contigs, total bp, N50), mitogenome length, MitoZ / MITOS2 feature counts,
+number of target genes recovered, and BUSCO C/S/D/F/M. A stage that was skipped
+or produced no result leaves its columns blank. A curated subset of the same
+table appears in the MultiQC report as the "skimflow per-sample metrics"
+section.
+
 ## Tools
 
 | Step | Tool |
 | --- | --- |
 | Read QC | fastp |
 | Decontamination (optional) | kraken2 |
-| Genome size + coverage | RESPECT (Sayyari et al. 2022); needs a Gurobi licence |
+| Genome size + coverage | RESPECT (Sarmashghi et al. 2021, PLOS Comput Biol); needs a Gurobi licence |
 | Short-read assembly | MEGAHIT |
 | Long-read QC + assembly | Filtlong + Flye |
 | Mitogenome | GetOrganelle |
 | Mitogenome annotation | MitoZ / MITOS2 |
 | Per-gene mito harvest | MITOS2-annotation parser (bundled scripts) |
+| Alignment + trimming | MAFFT + trimAl |
+| Phylogenetics | IQ-TREE (supermatrix + per-gene, nt + aa) |
 | Markers | BUSCO |
 | Report | MultiQC |
 

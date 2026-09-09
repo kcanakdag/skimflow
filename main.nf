@@ -12,6 +12,9 @@ include { MITO }                  from './modules/mitogenome.nf'
 include { MITOGENOME_ANNOTATION } from './modules/mitogenome_annotation.nf'
 include { MITO_GENES }            from './modules/mito_genes.nf'
 include { MARKER_EXTRACTION }     from './modules/markers.nf'
+include { PHYLOGENY }             from './modules/phylogeny.nf'
+include { ASSEMBLY_STATS }        from './modules/summary_metrics.nf'
+include { SUMMARY_METRICS }       from './modules/summary_metrics.nf'
 include { REPORT }                from './modules/report.nf'
 
 // Allowed long-read technologies (used to validate meta.lr_type at parse time).
@@ -184,7 +187,38 @@ workflow {
     FLYE(LR_QC.out.reads)
 
     // --- Markers over both assemblies (mix is where the tracks rejoin) ---
-    MARKER_EXTRACTION(ASSEMBLY.out.contigs.mix(FLYE.out.contigs))
+    contigs_ch = ASSEMBLY.out.contigs.mix(FLYE.out.contigs)
+    MARKER_EXTRACTION(contigs_ch)
+    ASSEMBLY_STATS(contigs_ch)
+
+    // --- Phylogeny over the harvested per-gene FASTAs (nt + aa) ---
+    if (params.skip_phylo) {
+        phylo_summary_ch = Channel.empty()
+        phylo_tree_ch    = Channel.empty()
+    } else {
+        PHYLOGENY(MITO_GENES.out.nt, MITO_GENES.out.aa)
+        phylo_summary_ch = PHYLOGENY.out.summary
+        phylo_tree_ch    = PHYLOGENY.out.treeplot
+    }
+
+    // --- Per-sample metrics table joining every stage ---
+    SUMMARY_METRICS(
+        READ_QC.out.json.map                    { meta, f -> f }.collect().ifEmpty([]),
+        genome_size_ch,
+        ASSEMBLY_STATS.out.stats.map            { meta, f -> f }.collect().ifEmpty([]),
+        MITO.out.summary.map                    { meta, f -> f }.collect().ifEmpty([]),
+        MITOGENOME_ANNOTATION.out.summary.map   { meta, f -> f }.collect().ifEmpty([]),
+        MITO_GENES.out.matrix.collect().ifEmpty([]),
+        MARKER_EXTRACTION.out.summary.map       { meta, f -> f }.collect().ifEmpty([]),
+    )
+
+    // Phylogeny tables, the rendered tree SVGs, and the metrics table all feed
+    // MultiQC's extra dir as custom content.
+    extra_summaries_ch = phylo_summary_ch
+        .mix(phylo_tree_ch)
+        .mix(SUMMARY_METRICS.out.summary)
+        .collect()
+        .ifEmpty([])
 
     REPORT(
         READ_QC.out.json.map              { meta, f -> f }.collect().ifEmpty([]),
@@ -193,5 +227,6 @@ workflow {
         kraken_report_ch,
         mitogenome_summary_ch,
         gene_summary_ch,
+        extra_summaries_ch,
     )
 }
