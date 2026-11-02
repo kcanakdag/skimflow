@@ -29,10 +29,19 @@ class TestCanonical(unittest.TestCase):
         self.assertIsNone(h.canonical_gene('OH'))
 
     def test_split_tags(self):
-        self.assertEqual(h.split_tags('cox1_1'), ('cox1', None))
-        self.assertEqual(h.split_tags('cox1copy2'), ('cox1', None))
-        self.assertEqual(h.split_tags('rrnL-a'), ('rrnL', 'a'))
-        self.assertEqual(h.split_tags('nad4l'), ('nad4l', None))
+        self.assertEqual(h.split_tags('cox1_1'), ('cox1', None, '1'))
+        self.assertEqual(h.split_tags('cox1copy2'), ('cox1', None, '2'))
+        self.assertEqual(h.split_tags('rrnL-a'), ('rrnL', 'a', None))
+        self.assertEqual(h.split_tags('nad4l'), ('nad4l', None, None))
+        self.assertEqual(h.split_tags('rrnL_1-a'), ('rrnL', 'a', '1'))
+
+    def test_copy_and_fragment_tags_combined(self):
+        # MITOS2 names a feature NAME_COPY-PART.
+        self.assertEqual(h.canonical_gene('rrnL_1-a'), 'rrnl')
+        self.assertEqual(h.canonical_gene('rrnL_0-b'), 'rrnl')
+        self.assertEqual(h.canonical_gene('cox1_1-a'), 'cox1')
+        self.assertEqual(h.canonical_gene('nad4l_1'), 'nad4l')
+        self.assertIsNone(h.canonical_gene('OH_2-a'))
 
 
 class TestParseAndSelect(unittest.TestCase):
@@ -81,6 +90,39 @@ class TestParseAndSelect(unittest.TestCase):
         # whitespace -> '_' happens before illegal-char stripping, so the space
         # after 'sp.' becomes '_' and the '(', ')', ';' are dropped.
         self.assertEqual(h.sanitize_label('sp. (A);1'), 'sp._A1')
+
+
+def _rec(raw, start, end, strand, seq):
+    base, frag, copy = h.split_tags(raw)
+    return {'seqid': 'c1', 'start': start, 'end': end, 'strand': strand,
+            'raw': raw, 'canon': h.canonical_gene(raw), 'frag': frag,
+            'copy': copy, 'seq': seq}
+
+
+class TestCopyFragmentSelection(unittest.TestCase):
+    def test_full_copy_beats_shorter_fragmented_copy(self):
+        recs = [_rec('rrnL_0', 1, 100, '+', 'A' * 100),
+                _rec('rrnL_1-a', 200, 229, '+', 'C' * 30),
+                _rec('rrnL_1-b', 240, 269, '+', 'G' * 30)]
+        feats = h.select_features(recs)
+        self.assertEqual(feats['rrnl']['seq'], 'A' * 100)
+        self.assertFalse(feats['rrnl']['merged'])
+
+    def test_fragments_of_different_copies_not_joined(self):
+        recs = [_rec('rrnS_0-a', 10, 49, '+', 'A' * 40),
+                _rec('rrnS_0-b', 60, 99, '+', 'C' * 40),
+                _rec('rrnS_1-a', 300, 349, '+', 'G' * 50),
+                _rec('rrnS_1-b', 400, 439, '+', 'T' * 40)]
+        feats = h.select_features(recs)
+        self.assertEqual(feats['rrns']['seq'], 'G' * 50 + 'T' * 40)
+        self.assertTrue(feats['rrns']['merged'])
+        self.assertEqual((feats['rrns']['start'], feats['rrns']['end']), (300, 439))
+
+    def test_combined_tag_gene_not_reported_absent(self):
+        recs = [_rec('nad5_1-a', 10, 39, '+', 'A' * 30),
+                _rec('nad5_1-b', 50, 79, '+', 'C' * 30)]
+        feats = h.select_features(recs)
+        self.assertEqual(feats['nad5']['seq'], 'A' * 30 + 'C' * 30)
 
 
 class TestCli(unittest.TestCase):

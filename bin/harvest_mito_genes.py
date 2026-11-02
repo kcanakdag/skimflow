@@ -46,39 +46,42 @@ SYNONYMS = {
 }
 
 _FRAG_RE = re.compile(r'^(?P<base>.+?)-(?P<frag>[a-z])$')              # rrnL-a, rrnL-b
-_COPY_RE = re.compile(r'^(?P<base>.+?)(?:_\d+|-\d+|copy\d+)$', re.I)   # cox1_1 is what MITOS2 emits; -N/copyN are defensive
+_COPY_RE = re.compile(r'^(?P<base>.+?)(?:_|-|copy)(?P<copy>\d+)$', re.I)   # cox1_1 is what MITOS2 emits; -N/copyN are defensive
 
 
 def split_tags(raw):
-    """Return (base_name, frag_letter|None). A single letter AFTER a hyphen is
-    an rRNA fragment tag; a trailing _N/-N/copyN is a duplicate-copy tag. Never
-    strips a trailing protein letter such as the 'l' of nad4l."""
+    """Return (base_name, frag_letter|None, copy_index|None). MITOS2 names a
+    feature NAME_COPY-PART, so the fragment tag (a single letter AFTER a hyphen)
+    is stripped first and the duplicate-copy tag (trailing _N/-N/copyN) is then
+    stripped from what remains: 'rrnL_1-a' -> ('rrnL', 'a', '1'). Never strips a
+    trailing protein letter such as the 'l' of nad4l."""
     name = raw.strip()
+    frag = None
     m = _FRAG_RE.match(name)
     if m:
-        return m.group('base'), m.group('frag')
+        name, frag = m.group('base'), m.group('frag')
     m = _COPY_RE.match(name)
     if m:
-        return m.group('base'), None
-    return name, None
+        return m.group('base'), frag, m.group('copy')
+    return name, frag, None
 
 
 def canonical_gene(raw):
     """Map a raw MITOS gene name to a canonical key, or None if not targeted."""
-    base, _ = split_tags(raw)
+    base = split_tags(raw)[0]
     norm = re.sub(r'[^a-z0-9]', '', base.lower())
     return SYNONYMS.get(norm)
 
 
 def parse_mitos_fasta(text):
-    """Yield a dict per record: seqid,start,end,strand,raw,canon,frag,seq."""
+    """Yield a dict per record: seqid,start,end,strand,raw,canon,frag,copy,seq."""
     seqid = coords = strand = raw = None
     seq = []
 
     def build():
         if raw is None:
             return None
-        frag = split_tags(raw)[1]
+        _base, frag, copy = split_tags(raw)
         start = end = 0
         if coords and '-' in coords:
             a, b = coords.split('-', 1)
@@ -88,7 +91,7 @@ def parse_mitos_fasta(text):
                 start = end = 0
         return {'seqid': seqid, 'start': start, 'end': end, 'strand': strand,
                 'raw': raw, 'canon': canonical_gene(raw), 'frag': frag,
-                'seq': ''.join(seq)}
+                'copy': copy, 'seq': ''.join(seq)}
 
     for line in text.splitlines():
         if line.startswith('>'):
@@ -109,31 +112,44 @@ def parse_mitos_fasta(text):
 
 
 def select_features(records):
-    """canon -> {seq, merged, start, end}. Merge rRNA fragments in strand-aware
-    coding order; otherwise keep the longest copy."""
+    """canon -> {seq, merged, start, end}. Each unfragmented record is one
+    candidate; the fragments of one (gene, copy) are merged, in strand-aware
+    coding order, into one more candidate. The longest candidate is kept, so
+    fragments of different copies are never joined and a full copy is not
+    displaced by a shorter fragmented one."""
     by_gene = {}
     for r in records:
         if r['canon'] is not None:
             by_gene.setdefault(r['canon'], []).append(r)
     out = {}
     for canon, recs in by_gene.items():
-        frags = [r for r in recs if r['frag'] is not None]
-        if frags:
+        cands = []
+        frag_groups = {}
+        for r in recs:
+            if r['frag'] is None:
+                cands.append({'seq': r['seq'], 'merged': False,
+                              'start': r['start'], 'end': r['end']})
+            else:
+                frag_groups.setdefault(r['copy'], []).append(r)
+        for copy, frags in frag_groups.items():
             # MITOS emits each fragment already in coding orientation, so coding
             # 5'->3' order is ascending genomic coordinate on the plus strand and
             # descending on the minus strand. Sort strand-aware so a minus-strand
-            # rRNA is not silently scrambled (letter order is not reliable). This
-            # assumes a gene is reported as fragments OR one full record, never
-            # both (true for MITOS in practice).
+            # rRNA is not silently scrambled (letter order is not reliable).
             strand = frags[0]['strand']
             frags.sort(key=lambda r: r['start'], reverse=(strand == '-'))
-            out[canon] = {'seq': ''.join(r['seq'] for r in frags), 'merged': True,
+            sys.stderr.write('note: %s: merged %d fragments of copy %s (%s)\n'
+                             % (canon, len(frags), copy if copy is not None else '-',
+                                ','.join(r['raw'] for r in frags)))
+            cands.append({'seq': ''.join(r['seq'] for r in frags), 'merged': True,
                           'start': min(r['start'] for r in frags),
-                          'end': max(r['end'] for r in frags)}
-        else:
-            best = max(recs, key=lambda r: len(r['seq']))
-            out[canon] = {'seq': best['seq'], 'merged': False,
-                          'start': best['start'], 'end': best['end']}
+                          'end': max(r['end'] for r in frags)})
+        best = max(cands, key=lambda c: len(c['seq']))
+        if len(cands) > 1:
+            sys.stderr.write('note: %s: kept longest of %d candidates (%d bp%s)\n'
+                             % (canon, len(cands), len(best['seq']),
+                                ', merged fragments' if best['merged'] else ''))
+        out[canon] = best
     return out
 
 
