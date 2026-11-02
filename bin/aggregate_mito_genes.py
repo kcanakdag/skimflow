@@ -34,14 +34,15 @@ def read_fasta(path):
     return out
 
 
-def collision_headers(seqs_dir, stem):
-    """Return the set of headers that map to more than one distinct sample for
-    this gene stem across BOTH .fna and .faa files, so nt and aa outputs always
-    apply identical collision suffixing."""
+def collision_headers(seqs_dir):
+    """Return the set of headers that map to more than one distinct sample
+    across ALL genes and BOTH .fna and .faa files. Computing it globally (not
+    per gene) means a shared label is suffixed in every gene and both sequence
+    types, so concat_alignments.py can never join two specimens into one tip."""
     samples_by_header = {}
     if os.path.isdir(seqs_dir):
         for f in sorted(os.listdir(seqs_dir)):
-            if gene_of(f) != stem or not (f.endswith('.fna') or f.endswith('.faa')):
+            if not (f.endswith('.fna') or f.endswith('.faa')):
                 continue
             sample = sample_of(f)
             for header, _seq in read_fasta(os.path.join(seqs_dir, f)):
@@ -49,7 +50,7 @@ def collision_headers(seqs_dir, stem):
     return {h for h, s in samples_by_header.items() if len(s) > 1}
 
 
-def aggregate_ext(seqs_dir, ext, outdir):
+def aggregate_ext(seqs_dir, ext, outdir, collide):
     files = []
     if os.path.isdir(seqs_dir):
         files = sorted(f for f in os.listdir(seqs_dir) if f.endswith(ext))
@@ -61,7 +62,6 @@ def aggregate_ext(seqs_dir, ext, outdir):
         group = by_gene.get(stem, [])
         if not group:
             continue
-        collide = collision_headers(seqs_dir, stem)
         records = []  # [header, seq, sample]
         for f in group:
             sample = sample_of(f)
@@ -99,8 +99,9 @@ def main(argv=None):
     ap.add_argument('--outdir', required=True)
     args = ap.parse_args(argv)
 
-    aggregate_ext(args.seqs_dir, '.fna', os.path.join(args.outdir, 'nt'))
-    aggregate_ext(args.seqs_dir, '.faa', os.path.join(args.outdir, 'aa'))
+    collide = collision_headers(args.seqs_dir)
+    aggregate_ext(args.seqs_dir, '.fna', os.path.join(args.outdir, 'nt'), collide)
+    aggregate_ext(args.seqs_dir, '.faa', os.path.join(args.outdir, 'aa'), collide)
 
     rows, idx = read_occ(args.occ_dir)
     samples, data, species, flags = [], {}, {}, {}

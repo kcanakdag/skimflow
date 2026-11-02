@@ -110,6 +110,44 @@ class TestAggregate(unittest.TestCase):
             self.assertNotIn('>Syllis_okadai\n', aa,
                              'bare header in aa would diverge from nt suffix')
 
+    def test_collision_suffix_applies_across_genes(self):
+        """Regression: A and B share a species label and both have COX1, but
+        16S is A-only and COB is B-only. The suffix must be applied in every
+        gene, otherwise the bare label in 16S and COB is concatenated into one
+        chimeric taxon made of A's 16S and B's COB."""
+        with tempfile.TemporaryDirectory() as root:
+            seqs = os.path.join(root, 'seqs')
+            occ = os.path.join(root, 'occ')
+            write(os.path.join(seqs, 'COX1__A.fna'), '>Syllis_okadai\nAAAA\n')
+            write(os.path.join(seqs, 'COX1__B.fna'), '>Syllis_okadai\nCCCC\n')
+            write(os.path.join(seqs, '16S__A.fna'), '>Syllis_okadai\nGGGG\n')
+            write(os.path.join(seqs, 'COB__B.fna'), '>Syllis_okadai\nTTTT\n')
+            write(os.path.join(seqs, 'COB__B.faa'), '>Syllis_okadai\nMW\n')
+            write(os.path.join(occ, 'dummy.occupancy.tsv'),
+                  'sample\tspecies\tgene\tlen_nt\tlen_aa\tflags\n')
+            out = os.path.join(root, 'out')
+            subprocess.run(
+                [sys.executable, os.path.join(BIN, 'aggregate_mito_genes.py'),
+                 '--seqs-dir', seqs, '--occ-dir', occ, '--outdir', out],
+                check=True)
+            headers = []
+            for sub, name in (('nt', 'COX1.fasta'), ('nt', '16S.fasta'),
+                              ('nt', 'COB.fasta'), ('aa', 'COB.faa')):
+                for h, _ in a.read_fasta(os.path.join(out, sub, name)):
+                    headers.append(h)
+            self.assertEqual(len(headers), 5)
+            for h in headers:
+                self.assertIn(h, ('Syllis_okadai__A', 'Syllis_okadai__B'))
+            # concatenation must yield exactly the two real specimens
+            cat = os.path.join(root, 'cat')
+            subprocess.run(
+                [sys.executable, os.path.join(BIN, 'concat_alignments.py'),
+                 '--aln-dir', os.path.join(out, 'nt'), '--outdir', cat,
+                 '--min-taxa', '1'],
+                check=True, capture_output=True)
+            taxa = [h for h, _ in a.read_fasta(os.path.join(cat, 'supermatrix.fasta'))]
+            self.assertEqual(sorted(taxa), ['Syllis_okadai__A', 'Syllis_okadai__B'])
+
     def test_no_collision_no_suffix(self):
         """Two samples with DISTINCT species headers must not gain any __ suffix."""
         with tempfile.TemporaryDirectory() as root:
