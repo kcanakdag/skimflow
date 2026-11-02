@@ -9,11 +9,14 @@ process ASSEMBLY {
     publishDir "${params.outdir}/assembly", mode: 'copy', saveAs: { fn -> "${meta.id}/${fn}" }
 
     cpus 16
-    memory '32 GB'
+    // Scale with task.attempt so the gwdg retry on exit 130..143 (OOM or
+    // walltime kill) gets more room instead of repeating the same request.
+    memory { 32.GB * task.attempt }
     // MEGAHIT's meta-sensitive preset runs the full k-ladder (k=21..141);
     // larger genomes (~1 Gbp skim) exceed 4 h and get wall-clock-killed
-    // (exit 140). scc-cpu allows up to 48 h; 24 h gives ample headroom.
-    time '24h'
+    // (exit 140). scc-cpu allows up to 48 h; 24 h gives ample headroom and
+    // a retry is capped at 47 h to stay under that limit.
+    time { [24.h * task.attempt, 47.h].min() }
 
     input:
     tuple val(meta), path(reads)
@@ -29,6 +32,7 @@ process ASSEMBLY {
         ${input_args} \\
         --presets ${params.megahit_preset} \\
         -t ${task.cpus} \\
+        -m ${(task.memory.toBytes() * 0.9) as long} \\
         -o megahit_out
 
     cp megahit_out/final.contigs.fa ${meta.id}.contigs.fasta

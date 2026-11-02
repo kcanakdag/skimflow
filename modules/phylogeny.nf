@@ -57,6 +57,7 @@ process TRIM {
 
     output:
     tuple val(seqtype), val(gene), path("${gene}.trimmed.fasta"), emit: trimmed
+    path "${gene}.trim_fallback.txt", optional: true
 
     script:
     """
@@ -67,6 +68,8 @@ process TRIM {
     if trimal -in ${aln} -out ${gene}.trimmed.fasta -${params.trimal_mode} 2>trimal.err && [ -s ${gene}.trimmed.fasta ]; then
         :
     else
+        echo "WARNING: trimAl (${params.trimal_mode}) failed or produced empty output for ${gene} (${seqtype}); using untrimmed alignment" >&2
+        { echo "gene=${gene} seqtype=${seqtype} mode=${params.trimal_mode} status=fallback_untrimmed"; cat trimal.err; } > ${gene}.trim_fallback.txt
         cp ${aln} ${gene}.trimmed.fasta
     fi
     """

@@ -19,6 +19,7 @@ process LR_QC {
 
     script:
     """
+    set -euo pipefail
     filtlong \\
         --min_length ${params.filtlong_min_length} \\
         --keep_percent ${params.filtlong_keep_percent} \\

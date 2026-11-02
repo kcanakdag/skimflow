@@ -34,7 +34,7 @@ process DECONTAM {
         """
         kraken2 --db ${db} --threads ${task.cpus} \\
                 --unclassified-out ${meta.id}_decontam.fastq \\
-                --output ${meta.id}.kraken.out \\
+                --output /dev/null \\
                 --report ${meta.id}.kraken.report \\
                 ${reads[0]}
         gzip ${meta.id}_decontam.fastq
@@ -44,7 +44,7 @@ process DECONTAM {
         # kraken2 replaces the # in --unclassified-out with _1 / _2 for paired reads
         kraken2 --db ${db} --threads ${task.cpus} --paired \\
                 --unclassified-out ${meta.id}_decontam_R#.fastq \\
-                --output ${meta.id}.kraken.out \\
+                --output /dev/null \\
                 --report ${meta.id}.kraken.report \\
                 ${reads[0]} ${reads[1]}
         gzip ${meta.id}_decontam_R_1.fastq ${meta.id}_decontam_R_2.fastq
