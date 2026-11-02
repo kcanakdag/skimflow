@@ -162,7 +162,7 @@ with open(f'{sample}.coverage.txt', 'w') as fh:
 with open(f'{sample}_respect_mqc.tsv', 'w') as fh:
     fh.write('# id: respect_genome_size\\n')
     fh.write('# section_name: "RESPECT (genome size + coverage)"\\n')
-    fh.write('# description: "Skim-data estimates from RESPECT. expected_size_bp is the samplesheet override (NA if not provided)."\\n')
+    fh.write('# description: "Skim-data estimates from RESPECT. expected_size_bp is the literature value from the samplesheet, shown only as a sanity check against the k-mer estimate (NA if not provided)."\\n')
     fh.write('# format: "tsv"\\n')
     fh.write('# plot_type: "table"\\n')
     fh.write('Sample\\tgenome_size_bp\\tcoverage_x\\texpected_size_bp\\n')

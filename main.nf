@@ -202,6 +202,12 @@ workflow {
     }
 
     // --- Per-sample metrics table joining every stage ---
+    // Samplesheet metadata (id, species, expected size) for both tracks, so
+    // the table still has species / expected size when a stage is skipped.
+    meta_tsv_ch = parsed_ch
+        .map { meta, reads, lr -> "${meta.id}\t${meta.species ?: ''}\t${meta.expected_size ?: ''}" }
+        .collectFile(name: 'samples_meta.tsv', newLine: true)
+        .ifEmpty([])
     SUMMARY_METRICS(
         READ_QC.out.json.map                    { meta, f -> f }.collect().ifEmpty([]),
         genome_size_ch,
@@ -210,6 +216,7 @@ workflow {
         MITOGENOME_ANNOTATION.out.summary.map   { meta, f -> f }.collect().ifEmpty([]),
         MITO_GENES.out.matrix.collect().ifEmpty([]),
         MARKER_EXTRACTION.out.summary.map       { meta, f -> f }.collect().ifEmpty([]),
+        meta_tsv_ch,
     )
 
     // Phylogeny tables, the rendered tree SVGs, and the metrics table all feed

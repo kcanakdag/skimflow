@@ -143,14 +143,49 @@ def parse_busco(busco_dir, table):
         sample = None
         fm = _BUSCO_FILE_RE.search(text)
         if fm:
-            sample = os.path.basename(fm.group(1)).split('.', 1)[0]
+            # Strip only the known suffix so ids containing '.' (e.g. 'sp.1')
+            # stay whole.
+            sample = re.sub(r'\.contigs\.fasta$', '', os.path.basename(fm.group(1)))
         if not sample:
             # Fall back to the run name embedded in the filename: ...<id>_busco.txt
             base = os.path.basename(path)
-            rn = re.search(r'\.([^.]+)_busco\.txt$', base)
+            rn = re.search(
+                r'^short_summary\.(?:specific|generic)\.[^.]+\.(.+)_busco\.txt$', base)
             sample = rn.group(1) if rn else base
         r = rec(table, sample)
         r['busco_C'], r['busco_S'], r['busco_D'], r['busco_F'], r['busco_M'] = m.groups()
+
+
+def _sanitize_label(s):
+    """Same rule as harvest_mito_genes.sanitize_label, so a species seeded
+    from the samplesheet matches the label written to occupancy.tsv."""
+    s = (s or '').strip()
+    s = re.sub(r'\s+', '_', s)
+    s = re.sub(r'[^A-Za-z0-9_.-]', '', s)
+    return s or 'unknown'
+
+
+def parse_meta(meta_dir, table):
+    """Fill species / expected_size_bp from the samplesheet metadata.
+
+    Runs after every stage parser and only fills fields that are still blank
+    (or NA for expected_size_bp), for samples already in the table. Values
+    from occupancy.tsv and RESPECT win; no rows are added.
+    """
+    for path in sorted(glob.glob(os.path.join(meta_dir, '*.tsv'))):
+        for line in _read(path).splitlines():
+            if not line.strip():
+                continue
+            parts = (line.split('\t') + ['', '', ''])[:3]
+            sample, species, expected = (p.strip() for p in parts)
+            if sample not in table:
+                continue
+            r = table[sample]
+            label = _sanitize_label(species)
+            if not r.get('species') and species and label != 'unknown':
+                r['species'] = label
+            if expected and str(r.get('expected_size_bp', '')).strip() in ('', 'NA'):
+                r['expected_size_bp'] = expected
 
 
 def main(argv=None):
@@ -162,6 +197,7 @@ def main(argv=None):
     ap.add_argument('--annot-dir', default='annot')
     ap.add_argument('--occ-dir', default='occ')
     ap.add_argument('--busco-dir', default='busco')
+    ap.add_argument('--meta-dir', default='meta')
     ap.add_argument('--outdir', required=True)
     args = ap.parse_args(argv)
 
@@ -173,6 +209,7 @@ def main(argv=None):
     parse_annot(args.annot_dir, table)
     parse_occupancy(args.occ_dir, table)
     parse_busco(args.busco_dir, table)
+    parse_meta(args.meta_dir, table)
 
     os.makedirs(args.outdir, exist_ok=True)
     samples = sorted(table)
@@ -190,8 +227,25 @@ def main(argv=None):
     with open(mqc_path, 'w') as fh:
         fh.write('# id: "skimflow_metrics"\n')
         fh.write('# section_name: "skimflow per-sample metrics"\n')
-        fh.write('# description: "One row per sample joining QC, RESPECT, assembly, mitogenome, gene occupancy and BUSCO. Blank = stage skipped or produced no result."\n')
+        fh.write('# description: "One row per sample joining QC, RESPECT, assembly, mitogenome, gene occupancy and BUSCO. Blank = stage not run for this sample; NA = stage ran but gave no estimate; 0 = stage ran and recovered nothing."\n')
         fh.write('# plot_type: "table"\n')
+        fh.write('# headers:\n'
+                 '#     reads_out:\n'
+                 '#         title: "Reads after QC"\n'
+                 '#         description: "fastp reads passing filters, R1+R2 counted"\n'
+                 '#     coverage_x:\n'
+                 '#         suffix: "x"\n'
+                 '#         description: "RESPECT depth of pooled library"\n'
+                 '#     mito_length_bp:\n'
+                 '#         title: "Mito length"\n'
+                 '#         suffix: " bp"\n'
+                 '#         description: "longest GetOrganelle path"\n'
+                 '#     genes_recovered:\n'
+                 '#         max: 15\n'
+                 '#     busco_C:\n'
+                 '#         suffix: "%"\n'
+                 '#         min: 0\n'
+                 '#         max: 100\n')
         fh.write('Sample\t' + '\t'.join(mqc_cols) + '\n')
         for s in samples:
             r = table[s]

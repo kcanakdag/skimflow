@@ -75,6 +75,7 @@ process SUMMARY_METRICS {
     path annot,   stageAs: 'annot/*'
     path occ,     stageAs: 'occ/*'
     path busco,   stageAs: 'busco/*'
+    path meta_tsv, stageAs: 'meta/*'
 
     output:
     path 'skimflow_metrics.csv',     emit: csv
@@ -83,9 +84,9 @@ process SUMMARY_METRICS {
     script:
     """
     # stageAs only creates a dir when at least one file is present; make the
-    # rest so collect_metrics.py always sees all seven inputs (same trick as
+    # rest so collect_metrics.py always sees all eight inputs (same trick as
     # the REPORT step).
-    mkdir -p qc respect assembly mito annot occ busco
+    mkdir -p qc respect assembly mito annot occ busco meta
     collect_metrics.py \\
         --qc-dir qc \\
         --respect-dir respect \\
@@ -94,6 +95,7 @@ process SUMMARY_METRICS {
         --annot-dir annot \\
         --occ-dir occ \\
         --busco-dir busco \\
+        --meta-dir meta \\
         --outdir .
     """
 }
