@@ -22,16 +22,55 @@ include { REPORT }                from './modules/report.nf'
 // syntax parser accepts it alongside the other declarations.
 def LR_TYPES() { ['nanopore', 'pacbio'] }
 
+// Sample ids name every per-sample output file and results/ subdirectory and
+// are passed to tool command lines, so restrict them to a file-name-safe set.
+def SAMPLE_ID_RE() { /^[A-Za-z0-9_-]+$/ }
+
+def checkSampleId(id, where) {
+    if (!(id ==~ SAMPLE_ID_RE()))
+        error "${where}: sample_id '${id}' may only contain letters, digits, '_' and '-' (it names output files; replace dots or spaces with underscores)"
+    id
+}
+
+// Resolve a samplesheet path: absolute paths and URLs (s3://, https://, ...)
+// are used as-is, a leading ~/ expands to $HOME, and any other relative path
+// is resolved against projectDir (the documented rule).
+def resolveSheetPath(String p) {
+    if (p.startsWith('/') || p.contains('://')) return p
+    if (p.startsWith('~/')) return System.getenv('HOME') + p.substring(1)
+    "${projectDir}/${p}"
+}
+
+// Parse an expected genome size in bp. Blank means "not given" (null). Whole
+// numbers in plain or scientific notation (1000000000, 1e9) are accepted;
+// anything else (1.5, 1,000, text) is a clear error instead of a silent NA.
+def parseExpectedSize(v, where) {
+    if (v == null || v.toString().trim() == '') return null
+    try {
+        return new BigDecimal(v.toString().trim()).toBigIntegerExact().longValueExact()
+    } catch (Exception e) {
+        error "${where}: expected_genome_size_bp must be a whole number of bp, got '${v}'"
+    }
+}
+
 // Parse samplesheet.csv into a channel of tuple(meta, reads, lr).
 // Exactly one of reads (non-empty list => short) / lr (path => long) is
 // populated; meta.read_type records which. Two new optional columns are
 // backward compatible via splitCsv(header:true): long_reads, lr_type.
 def parseSamplesheet(csvPath) {
+    // Validate ids eagerly so a bad sheet fails before any task runs, not at
+    // the cross-sample steps after all per-sample compute.
+    def ids  = file(csvPath, checkIfExists: true).splitCsv(header: true, strip: true)*.sample_id*.trim().findAll { it }
+    def dups = ids.countBy { it }.findAll { k, v -> v > 1 }.keySet()
+    if (dups) error "samplesheet: duplicate sample_id(s): ${dups.join(', ')}"
+    ids.each { checkSampleId(it, 'samplesheet') }
+
     Channel
         .fromPath(csvPath, checkIfExists: true)
         .splitCsv(header: true, strip: true)
         .map { row ->
             if (!row.sample_id?.trim()) error "samplesheet: missing sample_id in row: ${row}"
+            def sid = row.sample_id.trim()
 
             def has_short = row.fastq_1?.trim() as boolean
             def lr_str    = row.long_reads?.trim()
@@ -43,17 +82,17 @@ def parseSamplesheet(csvPath) {
                 error "samplesheet: ${row.sample_id} has neither fastq_1 nor long_reads"
 
             def size_str      = row.expected_genome_size_bp?.trim()
-            def expected_size = (size_str && size_str.isLong()) ? size_str.toLong() : null
+            def expected_size = parseExpectedSize(size_str, "samplesheet: ${sid}")
 
             if (has_long) {
-                def lf  = lr_str.startsWith('/') ? lr_str : "${projectDir}/${lr_str}"
+                def lf  = resolveSheetPath(lr_str)
                 def lr  = file(lf, checkIfExists: true)
                 def lrt = (row.lr_type?.trim() ?: params.lr_type)
                 if (!(lrt in LR_TYPES()))
                     error "samplesheet: ${row.sample_id} lr_type '${lrt}' must be one of ${LR_TYPES()}"
                 def meta = [
-                    id:            row.sample_id,
-                    species:       row.species_id?.trim() ?: row.sample_id,
+                    id:            sid,
+                    species:       row.species_id?.trim() ?: sid,
                     single_end:    true,
                     expected_size: expected_size,
                     read_type:     'long',
@@ -63,15 +102,15 @@ def parseSamplesheet(csvPath) {
             }
 
             // Short-read sample (the original short-read path).
-            def f1     = row.fastq_1.startsWith('/') ? row.fastq_1 : "${projectDir}/${row.fastq_1}"
+            def f1     = resolveSheetPath(row.fastq_1.trim())
             def r1     = file(f1, checkIfExists: true)
             def r2_str = row.fastq_2?.trim()
-            def f2     = r2_str ? (r2_str.startsWith('/') ? r2_str : "${projectDir}/${r2_str}") : null
+            def f2     = r2_str ? resolveSheetPath(r2_str) : null
             def r2     = f2 ? file(f2, checkIfExists: true) : null
             def reads  = r2 ? [r1, r2] : [r1]
             def meta = [
-                id:            row.sample_id,
-                species:       row.species_id?.trim() ?: row.sample_id,
+                id:            sid,
+                species:       row.species_id?.trim() ?: sid,
                 single_end:    r2 == null,
                 expected_size: expected_size,
                 read_type:     'short',
@@ -91,8 +130,8 @@ def parseDirectReads() {
     def reads = r2 ? [r1, r2] : [r1]
 
     def derived_id = r1.simpleName.replaceAll(/([._-]?[Rr]1|[._-]1)(_001)?$/, '')
-    def id         = params.sample_id ?: (derived_id ?: r1.simpleName)
-    def size_v     = params.expected_size ? params.expected_size.toString().toLong() : null
+    def id         = checkSampleId((params.sample_id ?: (derived_id ?: r1.simpleName)).toString().trim(), '--r1')
+    def size_v     = parseExpectedSize(params.expected_size ?: null, '--expected_size')
 
     def meta = [
         id:            id,
@@ -112,8 +151,8 @@ def parseDirectLong() {
     if (!(lrt in LR_TYPES()))
         error "--lr_type '${lrt}' must be one of ${LR_TYPES()}"
 
-    def id     = params.sample_id ?: lr.simpleName
-    def size_v = params.expected_size ? params.expected_size.toString().toLong() : null
+    def id     = checkSampleId((params.sample_id ?: lr.simpleName).toString().trim(), '--long_reads')
+    def size_v = parseExpectedSize(params.expected_size ?: null, '--expected_size')
 
     def meta = [
         id:            id,
