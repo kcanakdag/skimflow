@@ -205,8 +205,15 @@ process TREE_PLOT {
     path "${seqtype}_tree_mqc.html", emit: html
 
     script:
+    // Caption names only the support values IQ-TREE was asked to compute.
+    def has_alrt = (params.iqtree_alrt as int) > 0
+    def has_boot = (params.iqtree_bootstrap as int) > 0
+    def support_label = has_alrt && has_boot ? 'SH-aLRT / UFBoot' :
+                        has_boot ? 'UFBoot' :
+                        has_alrt ? 'SH-aLRT' : 'none'
     """
-    tree_to_svg.py --treefile ${treefile} --seqtype ${seqtype} --out ${seqtype}_tree_mqc.html
+    tree_to_svg.py --treefile ${treefile} --seqtype ${seqtype} \\
+        --support-label '${support_label}' --out ${seqtype}_tree_mqc.html
     """
 }
 

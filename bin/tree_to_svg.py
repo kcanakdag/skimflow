@@ -215,12 +215,12 @@ def render_svg(root, tips):
 
     draw_support(root, True)
 
-    # Tip labels (italic species names).
+    # Tip labels (italic species names; '_' shown as a space, display only).
     for t in tips:
         parts.append(
             '<text x="%.1f" y="%.1f" font-size="13" font-style="italic" '
             'fill="%s" dominant-baseline="middle">%s</text>'
-            % (px(t) + 6, py(t), TXT, html.escape(t.name or ""))
+            % (px(t) + 6, py(t), TXT, html.escape((t.name or "").replace("_", " ")))
         )
 
     # Scale bar (substitutions/site).
@@ -254,6 +254,12 @@ def main():
     ap.add_argument("--treefile", required=True)
     ap.add_argument("--seqtype", required=True, help="nt or aa")
     ap.add_argument("--out", required=True, help="output <seqtype>_tree_mqc.html")
+    ap.add_argument(
+        "--support-label",
+        default="SH-aLRT / UFBoot",
+        help="support type written in the caption, e.g. 'SH-aLRT / UFBoot', "
+        "'UFBoot', 'SH-aLRT' or 'none' (default: %(default)s)",
+    )
     args = ap.parse_args()
 
     with open(args.treefile) as fh:
@@ -270,15 +276,23 @@ def main():
     seqlabel = {"nt": "nucleotide", "aa": "amino-acid"}.get(st, st)
     svg = render_svg(root, tips)
 
+    if args.support_label.strip().lower() in ("", "none"):
+        support_txt = "no branch support was computed"
+    else:
+        support_txt = "internal labels are %s support" % args.support_label.strip()
+    # The description is a single-quoted YAML scalar: double any apostrophe.
+    support_txt = support_txt.replace("'", "''")
+
     header = (
         "<!--\n"
         "id: 'phylogeny_%s_tree'\n"
         "section_name: 'Phylogeny tree (%s)'\n"
-        "description: 'Maximum-likelihood species tree from the concatenated %s "
-        "(%s) supermatrix (IQ-TREE, model-selected). Branch lengths are "
-        "substitutions/site; internal labels are SH-aLRT / UFBoot support. "
-        "%d taxa.'\n"
-        "-->\n" % (st, st, st, seqlabel, len(tips))
+        "description: 'Unrooted maximum-likelihood species tree (no outgroup) "
+        "from the concatenated %s (%s) supermatrix (IQ-TREE, model-selected). "
+        "It is drawn from the arbitrary basal node IQ-TREE writes, so the order "
+        "at the base carries no rooting information. Branch lengths are "
+        "substitutions/site; %s. %d taxa.'\n"
+        "-->\n" % (st, st, st, seqlabel, support_txt, len(tips))
     )
     with open(args.out, "w") as fh:
         fh.write(header)
