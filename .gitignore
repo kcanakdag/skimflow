@@ -8,3 +8,5 @@ test_data/
 docs/
 __pycache__/
 *.pyc
+benchmarks/titration_out/
+/results_*/
