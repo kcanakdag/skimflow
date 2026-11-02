@@ -331,7 +331,11 @@ benchmarks/run_titration.sh \
 ```
 
 Pass `--organelle-db` / `--busco-db` (and `-- -resume`) so the reference
-databases are not re-downloaded for every level. `benchmarks/run_titration.sh --help`
+databases are not re-downloaded for every level. `titration.csv` records both
+`requested_cov` and the `achieved_cov` rasusa reached; a level above the input's
+depth is flagged with a WARN. A failed level is warned about and skipped. On
+GWDG, run the script inside an sbatch job with `--engine apptainer --profile gwdg
+--outdir $(ws_find genome-skim)/titration`. `benchmarks/run_titration.sh --help`
 lists all options.
 
 ## Output layout

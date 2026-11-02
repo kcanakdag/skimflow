@@ -23,6 +23,14 @@
 #       -- -resume
 #
 # Everything after `--` is forwarded verbatim to `nextflow run`.
+#
+# --engine picks the runtime for the rasusa step; --profile picks the Nextflow
+# profile (default: the engine name; `singularity` maps to `apptainer`).
+# On GWDG, run this script inside an sbatch job (not on a login node) with
+#   --engine apptainer --profile gwdg --outdir $(ws_find genome-skim)/titration
+#
+# titration.csv records both the requested and the achieved coverage (parsed
+# from rasusa's log). A failed level is reported as a WARN and skipped.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,6 +40,7 @@ R1=""; R2=""; GENOME_SIZE=""
 COVERAGES="0.05,0.1,0.25,0.5,1,2,5"
 SEEDS=1
 ENGINE="podman"
+PROFILE=""
 SAMPLE_ID="bench"
 OUTDIR="$REPO_DIR/benchmarks/titration_out"
 ORGANELLE_DB=""; BUSCO_DB=""
@@ -39,7 +48,7 @@ RASUSA_IMG="quay.io/biocontainers/rasusa:5.1.0--hfa8f182_0"
 NF_PASSTHROUGH=()
 
 usage() {
-    sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -51,6 +60,7 @@ while [[ $# -gt 0 ]]; do
         --coverages)     COVERAGES="$2"; shift 2 ;;
         --seeds)         SEEDS="$2"; shift 2 ;;
         --engine)        ENGINE="$2"; shift 2 ;;
+        --profile)       PROFILE="$2"; shift 2 ;;
         --sample-id)     SAMPLE_ID="$2"; shift 2 ;;
         --outdir)        OUTDIR="$2"; shift 2 ;;
         --organelle-db)  ORGANELLE_DB="$2"; shift 2 ;;
@@ -69,6 +79,17 @@ R1="$(cd "$(dirname "$R1")" && pwd)/$(basename "$R1")"
 if [[ -n "$R2" ]]; then
     R2="$(cd "$(dirname "$R2")" && pwd)/$(basename "$R2")"
     [[ -f "$R2" ]] || { echo "ERROR: R2 not found: $R2" >&2; exit 1; }
+fi
+
+# Checked here because run_in_engine's own error would land in rasusa.log.
+case "$ENGINE" in
+    podman|docker|apptainer|singularity) ;;
+    *) echo "ERROR: unsupported --engine '$ENGINE'" >&2; exit 1 ;;
+esac
+
+if [[ -z "$PROFILE" ]]; then
+    # There is no `singularity` profile in nextflow.config; apptainer is the match.
+    if [[ "$ENGINE" == singularity ]]; then PROFILE="apptainer"; else PROFILE="$ENGINE"; fi
 fi
 
 mkdir -p "$OUTDIR"
@@ -112,19 +133,40 @@ for cov in "${COV_LIST[@]}"; do
         bind_dirs=("$(dirname "$R1")" "$run_dir")
         [[ -n "$R2" ]] && bind_dirs+=("$(dirname "$R2")")
 
+        rasusa_log="$run_dir/rasusa.log"
+        rasusa_rc=0
         if [[ -n "$R2" ]]; then
             sub_r2="$run_dir/${run_id}_R2.fastq.gz"
             run_in_engine "${bind_dirs[@]}" -- \
                 rasusa reads --coverage "$cov" --genome-size "$GENOME_SIZE" \
-                    --seed "$seed" -o "$sub_r1" -o "$sub_r2" "$R1" "$R2"
+                    --seed "$seed" -o "$sub_r1" -o "$sub_r2" "$R1" "$R2" \
+                2> "$rasusa_log" || rasusa_rc=$?
         else
             run_in_engine "${bind_dirs[@]}" -- \
                 rasusa reads --coverage "$cov" --genome-size "$GENOME_SIZE" \
-                    --seed "$seed" -o "$sub_r1" "$R1"
+                    --seed "$seed" -o "$sub_r1" "$R1" \
+                2> "$rasusa_log" || rasusa_rc=$?
+        fi
+        cat "$rasusa_log" >&2
+        if [[ "$rasusa_rc" -ne 0 ]]; then
+            echo "WARN: [$run_id] subsampling failed (exit $rasusa_rc); skipping this level" >&2
+            continue
+        fi
+
+        # Depth actually reached. rasusa logs "Actual coverage of kept reads is X"
+        # on a normal subsample, and "... is not possible as the actual coverage
+        # is X" when the input has less depth than requested (it then passes the
+        # input through unchanged).
+        achieved=$(grep -oP 'Actual coverage of kept reads is \K[0-9.]+' "$rasusa_log" \
+                   || grep -oP 'actual coverage is \K[0-9.]+' "$rasusa_log" \
+                   || echo NA)
+        achieved=$(head -1 <<< "$achieved")
+        if grep -q 'is not possible' "$rasusa_log"; then
+            echo "WARN: [$run_id] input is saturated: requested ${cov}x but only ${achieved}x is available" >&2
         fi
 
         echo ">>> [$run_id] running pipeline"
-        nf_args=(run "$REPO_DIR" -profile "$ENGINE"
+        nf_args=(run "$REPO_DIR" -profile "$PROFILE"
                  --r1 "$sub_r1"
                  --sample_id "$run_id"
                  --expected_size "$GENOME_SIZE"
@@ -133,16 +175,20 @@ for cov in "${COV_LIST[@]}"; do
         [[ -n "$ORGANELLE_DB" ]] && nf_args+=(--organelle_db "$ORGANELLE_DB")
         [[ -n "$BUSCO_DB" ]]     && nf_args+=(--busco_db "$BUSCO_DB")
         [[ ${#NF_PASSTHROUGH[@]} -gt 0 ]] && nf_args+=("${NF_PASSTHROUGH[@]}")
-        nextflow "${nf_args[@]}"
-
         metrics="$run_dir/results/summary/skimflow_metrics.csv"
+        # Drop a stale table from an earlier run so a failed run is not collected.
+        rm -f "$metrics"
+        if ! nextflow "${nf_args[@]}"; then
+            echo "WARN: [$run_id] pipeline failed" >&2
+        fi
+
         if [[ -f "$metrics" ]]; then
             if [[ "$header_written" -eq 0 ]]; then
-                printf 'coverage,seed,%s\n' "$(head -1 "$metrics")" >> "$TITRATION"
+                printf 'requested_cov,achieved_cov,seed,%s\n' "$(head -1 "$metrics")" >> "$TITRATION"
                 header_written=1
             fi
             tail -n +2 "$metrics" | while IFS= read -r row; do
-                [[ -n "$row" ]] && printf '%s,%s,%s\n' "$cov" "$seed" "$row" >> "$TITRATION"
+                [[ -n "$row" ]] && printf '%s,%s,%s,%s\n' "$cov" "$achieved" "$seed" "$row" >> "$TITRATION"
             done
         else
             echo "WARN: no metrics for $run_id (pipeline produced no summary)" >&2
