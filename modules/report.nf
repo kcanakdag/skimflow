@@ -32,6 +32,11 @@ process REPORT {
     # multiqc bails out. Create empty placeholders to keep the CLI uniform.
     mkdir -p qc genome_size busco kraken mitogenome genes extra
 cat > multiqc_config.yaml <<'EOF'
+extra_fn_clean_exts:
+  - type: regex
+    pattern: '^short_summary\\.(specific|generic)\\.[^.]+\\.'
+  - type: regex
+    pattern: '_busco(\\.txt)?\$'
 custom_content:
   order:
     - skimflow_metrics
