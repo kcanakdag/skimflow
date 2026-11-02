@@ -28,6 +28,7 @@ process ALIGN {
 
     output:
     tuple val(seqtype), val(gene), path("${gene}.aln.fasta"), emit: aln
+    path "${gene}.mafft.log", optional: true
 
     script:
     """
@@ -37,7 +38,8 @@ process ALIGN {
         # MAFFT needs >=2 sequences; a single-taxon gene is trivially aligned.
         cp ${fasta} ${gene}.aln.fasta
     else
-        mafft ${params.mafft_args} ${fasta} > ${gene}.aln.fasta
+        # MAFFT stderr names the strategy --auto picked (e.g. FFT-NS-2, L-INS-i).
+        mafft ${params.mafft_args} ${fasta} > ${gene}.aln.fasta 2> ${gene}.mafft.log
     fi
     """
 }
@@ -109,7 +111,7 @@ process GENE_TREE {
         -m MFP \\
         -B ${params.iqtree_bootstrap} \\
         -alrt ${params.iqtree_alrt} \\
-        -T AUTO -ntmax ${task.cpus} \\
+        -T ${task.cpus} -seed ${params.iqtree_seed} \\
         --prefix ${gene} -redo
     """
 }
@@ -172,7 +174,7 @@ process SUPER_TREE {
             -m MFP \\
             -B ${params.iqtree_bootstrap} \\
             -alrt ${params.iqtree_alrt} \\
-            -T AUTO -ntmax ${task.cpus} \\
+            -T ${task.cpus} -seed ${params.iqtree_seed} \\
             --prefix ${seqtype}_species -redo > ${seqtype}_species.run.log 2>&1
         set -e
         if [ -f ${seqtype}_species.treefile ]; then status="ok"; else status="failed"; fi

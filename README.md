@@ -197,6 +197,7 @@ Common Nextflow-only overrides:
 | `--trimal_mode NAME` | trimAl method (`automated1`, `gappyout`, `strict`, ...), default `automated1`. |
 | `--iqtree_bootstrap N` | IQ-TREE UFBoot replicates, default `1000`. |
 | `--iqtree_alrt N` | IQ-TREE SH-aLRT replicates, default `1000`. |
+| `--iqtree_seed N` | IQ-TREE random seed (`-seed`), default `12345`. Thread count is fixed to the task's CPUs so re-runs give identical trees and support values. |
 
 ## Optional steps
 
@@ -419,6 +420,8 @@ Under `results/phylogeny/`, one subtree per sequence type (`nt/` and `aa/`):
 
 - `<type>/alignments/<GENE>.aln.fasta` and `<type>/trimmed/<GENE>.trimmed.fasta`
   are the MAFFT alignment and trimAl-trimmed alignment for each gene.
+  `<type>/alignments/<GENE>.mafft.log` is MAFFT's stderr, which names the
+  strategy `--auto` chose (e.g. FFT-NS-2 or L-INS-i) for the methods section.
 - `<type>/gene_trees/<GENE>.treefile` is the per-gene ML tree (with `.iqtree`
   report and `.contree`); a gene with fewer than four taxa gets a
   `<GENE>.skipped.txt` instead.
