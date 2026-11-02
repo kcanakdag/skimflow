@@ -262,7 +262,7 @@ workflow MITOGENOME_ANNOTATION {
     } else {
         db_req_ch = mito_fasta_ch.map { meta, fasta -> params.mitos2_refseqver }.first()
         MITOS2_DB(db_req_ch)
-        mitos2_refdir_ch = MITOS2_DB.out.refdir.collect(flat: false).map { it[0] }
+        mitos2_refdir_ch = MITOS2_DB.out.refdir
     }
     MITOS2_ANNOTATE(mito_fasta_ch, mitos2_refdir_ch)
 

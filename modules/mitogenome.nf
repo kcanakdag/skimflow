@@ -147,7 +147,7 @@ workflow MITO {
     } else {
         db_req_ch = reads_ch.map { meta, reads -> params.organelle_type }.first()
         MITO_DB(db_req_ch)
-        db_ch = MITO_DB.out.collect(flat: false).map { it[0] }
+        db_ch = MITO_DB.out
     }
 
     MITOGENOME(reads_ch, db_ch)

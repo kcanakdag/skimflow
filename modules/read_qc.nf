@@ -24,24 +24,14 @@ process READ_QC {
     tuple val(meta), path("${meta.id}.fastp.html"),          emit: html
 
     script:
-    if (meta.single_end) {
-        """
-        fastp \\
-            --in1 ${reads[0]} \\
-            --out1 ${meta.id}.trimmed_R1.fastq.gz \\
-            --json ${meta.id}.fastp.json \\
-            --html ${meta.id}.fastp.html \\
-            --thread ${task.cpus}
-        """
-    } else {
-        """
-        fastp \\
-            --in1 ${reads[0]} --in2 ${reads[1]} \\
-            --out1 ${meta.id}.trimmed_R1.fastq.gz \\
-            --out2 ${meta.id}.trimmed_R2.fastq.gz \\
-            --json ${meta.id}.fastp.json \\
-            --html ${meta.id}.fastp.html \\
-            --thread ${task.cpus}
-        """
-    }
+    def in_args  = meta.single_end ? "--in1 ${reads[0]}" : "--in1 ${reads[0]} --in2 ${reads[1]}"
+    def out_args = meta.single_end ? "--out1 ${meta.id}.trimmed_R1.fastq.gz" : "--out1 ${meta.id}.trimmed_R1.fastq.gz --out2 ${meta.id}.trimmed_R2.fastq.gz"
+    """
+    fastp \\
+        ${in_args} \\
+        ${out_args} \\
+        --json ${meta.id}.fastp.json \\
+        --html ${meta.id}.fastp.html \\
+        --thread ${task.cpus}
+    """
 }

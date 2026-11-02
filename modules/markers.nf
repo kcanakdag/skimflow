@@ -69,7 +69,7 @@ workflow MARKER_EXTRACTION {
     } else {
         db_req_ch = contigs_ch.map { meta, contigs -> params.busco_lineage }.first()
         BUSCO_DB(db_req_ch)
-        db_ch = BUSCO_DB.out.collect(flat: false).map { it[0] }
+        db_ch = BUSCO_DB.out
     }
 
     MARKERS(contigs_ch, db_ch)

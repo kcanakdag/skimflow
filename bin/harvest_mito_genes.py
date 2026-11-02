@@ -178,11 +178,14 @@ def select_aa(nt_features, aa_records):
 
 
 def sanitize_label(s):
-    """Newick-safe ASCII token: collapse whitespace to '_', drop illegal chars."""
+    """Newick-safe ASCII token: collapse whitespace to '_', drop illegal chars.
+
+    May return an empty string; callers chain fallbacks with `or`.
+    """
     s = (s or '').strip()
     s = re.sub(r'\s+', '_', s)
     s = re.sub(r'[^A-Za-z0-9_.-]', '', s)
-    return s or 'unknown'
+    return s
 
 
 def has_internal_stop(aa):
@@ -207,8 +210,7 @@ def main(argv=None):
     ap.add_argument('--outdir', required=True)
     args = ap.parse_args(argv)
 
-    label = sanitize_label(args.species_id) or sanitize_label(args.sample_id)
-    species = label
+    label = sanitize_label(args.species_id) or sanitize_label(args.sample_id) or 'unknown'
     seqs_dir = os.path.join(args.outdir, 'seqs')
     os.makedirs(seqs_dir, exist_ok=True)
 
@@ -248,7 +250,7 @@ def main(argv=None):
             if canon in PCG and aa:
                 with open(os.path.join(seqs_dir, '%s__%s.faa' % (stem, args.sample_id)), 'w') as out:
                     out.write('>%s\n%s\n' % (label, aa))
-            fh.write('%s\t%s\t%s\t%d\t%d\t%s\n' % (args.sample_id, species, stem, len_nt, len_aa, ','.join(flags)))
+            fh.write('%s\t%s\t%s\t%d\t%d\t%s\n' % (args.sample_id, label, stem, len_nt, len_aa, ','.join(flags)))
     return 0
 
 

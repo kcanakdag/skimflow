@@ -1,7 +1,5 @@
 #!/usr/bin/env nextflow
 
-nextflow.enable.dsl = 2
-
 include { READ_QC }               from './modules/read_qc.nf'
 include { DECONTAM }              from './modules/decontam.nf'
 include { GENOME_SIZE }           from './modules/genome_size.nf'
@@ -174,6 +172,8 @@ workflow {
         error "--r1/--r2 is single-sample direct mode; do not combine with --input"
     if (params.r2 && !params.r1)
         error "--r2 requires --r1"
+    if (!(params.mitogenome_topology in ['auto', 'linear', 'circular']))
+        error "mitogenome_topology must be one of: auto, linear, circular (got '${params.mitogenome_topology}')"
 
     if (params.r1) {
         parsed_ch = parseDirectReads()       // short
@@ -205,7 +205,7 @@ workflow {
         kraken_report_ch = DECONTAM.out.report.map { meta, f -> f }.collect().ifEmpty([])
     } else {
         clean_reads      = READ_QC.out.reads
-        kraken_report_ch = Channel.empty().collect().ifEmpty([])
+        kraken_report_ch = Channel.value([])
     }
 
     ASSEMBLY(clean_reads)        // MEGAHIT
@@ -221,7 +221,7 @@ workflow {
     gene_summary_ch = MITO_GENES.out.summary.collect().ifEmpty([])
 
     if (params.skip_respect) {
-        genome_size_ch = Channel.empty().collect().ifEmpty([])
+        genome_size_ch = Channel.value([])
     } else {
         GENOME_SIZE(clean_reads)
         genome_size_ch = GENOME_SIZE.out.summary.map { meta, f -> f }.collect().ifEmpty([])
@@ -253,14 +253,18 @@ workflow {
         .map { meta, reads, lr -> "${meta.id}\t${meta.species ?: ''}\t${meta.expected_size ?: ''}" }
         .collectFile(name: 'samples_meta.tsv', newLine: true)
         .ifEmpty([])
+    // QC json and BUSCO summaries feed both SUMMARY_METRICS and REPORT.
+    qc_json_ch = READ_QC.out.json.map { meta, f -> f }.collect().ifEmpty([])
+    busco_ch   = MARKER_EXTRACTION.out.summary.map { meta, f -> f }.collect().ifEmpty([])
+
     SUMMARY_METRICS(
-        READ_QC.out.json.map                    { meta, f -> f }.collect().ifEmpty([]),
+        qc_json_ch,
         genome_size_ch,
         ASSEMBLY_STATS.out.stats.map            { meta, f -> f }.collect().ifEmpty([]),
         MITO.out.summary.map                    { meta, f -> f }.collect().ifEmpty([]),
         MITOGENOME_ANNOTATION.out.summary.map   { meta, f -> f }.collect().ifEmpty([]),
         MITO_GENES.out.matrix.collect().ifEmpty([]),
-        MARKER_EXTRACTION.out.summary.map       { meta, f -> f }.collect().ifEmpty([]),
+        busco_ch,
         meta_tsv_ch,
     )
 
@@ -273,9 +277,9 @@ workflow {
         .ifEmpty([])
 
     REPORT(
-        READ_QC.out.json.map              { meta, f -> f }.collect().ifEmpty([]),
+        qc_json_ch,
         genome_size_ch,
-        MARKER_EXTRACTION.out.summary.map { meta, f -> f }.collect().ifEmpty([]),
+        busco_ch,
         kraken_report_ch,
         mitogenome_summary_ch,
         gene_summary_ch,
