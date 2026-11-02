@@ -10,14 +10,14 @@
 #
 # Mount the Gurobi licence at run time:
 #   apptainer exec --bind $HOME/gurobi.lic:/opt/gurobi/gurobi.lic respect_0.2.sif \
-#       respect -i reads_dir -o out_dir
+#       respect -d reads_dir -o out_dir
 #
-# The Nextflow gwdg profile picks up the .sif via apptainer.cacheDir; just
-# drop the built .sif into $APPTAINER_CACHEDIR and set
-#   params.respect_container = 'respect_0.2.sif'
+# Pass the absolute .sif path to Nextflow, e.g.
+#   --respect_container $APPTAINER_CACHEDIR/respect_0.2.sif
+# (scripts/run_gwdg.sh does this).
 
 Bootstrap: docker
-From: python:3.8-slim
+From: python:3.8.20-slim-bookworm
 
 %labels
     org.opencontainers.image.source https://github.com/shahab-sarmashghi/RESPECT
@@ -35,9 +35,13 @@ From: python:3.8-slim
         procps
     rm -rf /var/lib/apt/lists/*
 
+    # Pinned so podman and apptainer builds resolve to the same versions. The
+    # resolved set (for the methods section) is RESPECT 1.3.0 @2203a54,
+    # gurobipy 10.0.2, numpy 1.19.5, scipy 1.5.0, pandas 1.0.0, Python 3.8.20,
+    # Jellyfish 2.3.0 from Debian 12 (bookworm) apt.
     pip install --no-cache-dir \
-        git+https://github.com/shahab-sarmashghi/RESPECT.git \
-        gurobipy
+        git+https://github.com/shahab-sarmashghi/RESPECT.git@2203a54ce61cfb2f59feae8dd8ead0a2c04bf79c \
+        gurobipy==10.0.2 numpy==1.19.5 scipy==1.5.0 pandas==1.0.0
 
 %environment
     # Gurobi looks here automatically; override by binding a licence elsewhere
