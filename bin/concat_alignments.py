@@ -85,6 +85,8 @@ def main(argv=None):
                 'skipping\n' % stem)
             continue
         if len(recs) < args.min_taxa:
+            sys.stderr.write('[concat] %s: %d taxa < --min-taxa %d; dropped\n'
+                             % (stem, len(recs), args.min_taxa))
             continue
         length = len(recs[0][1])
         # If a taxon appears twice for one gene (should not happen post-harvest),
