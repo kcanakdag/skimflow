@@ -104,7 +104,7 @@ class TestAggregate(unittest.TestCase):
             # nt must have both records, both suffixed
             self.assertIn('>Syllis_okadai__A', nt)
             self.assertIn('>Syllis_okadai__B', nt)
-            # aa must also suffix sample A -- key regression assertion
+            # aa must also suffix sample A (key regression assertion)
             self.assertIn('>Syllis_okadai__A', aa,
                           'aa header must be suffixed to match nt; got: %r' % aa)
             self.assertNotIn('>Syllis_okadai\n', aa,
