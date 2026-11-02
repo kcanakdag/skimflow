@@ -11,7 +11,10 @@
 #      builds on login nodes, so on every partition except NHR standard96*
 #      the build runs inside an interactive srun job.
 #   5. Checks the Gurobi licence file when short-read RESPECT is needed.
-#   6. Runs `nextflow run . -profile gwdg` with the chosen input.
+#   6. Optionally (--prepull) pulls every pipeline image into the Apptainer
+#      cache inside an srun job on an inet compute node.
+#   7. Runs `nextflow run . -profile gwdg` with the chosen input, either in
+#      this shell (default) or (--submit) as an sbatch job on a compute node.
 #
 # Usage:
 #   ./scripts/run_gwdg.sh [options] [-- extra nextflow args]
@@ -47,6 +50,18 @@
 #   -a, --account ID           Slurm --account=<id>. Usually unnecessary on
 #                              project-specific GWDG usernames; only set if
 #                              you have multiple project accounts.
+#   --prepull                  Pull all pipeline images into the Apptainer cache
+#                              first, inside an srun job on an inet compute node
+#                              (32G RAM). Avoids big image pulls (e.g. mitoz) on
+#                              the memory-capped login node. Cached images are
+#                              skipped, so re-running is cheap.
+#   --submit                   Run the Nextflow head as an sbatch job on a
+#                              compute node instead of in this shell, then exit.
+#                              Recommended for real data: the login node's
+#                              memory cap can kill or hang a long-running head.
+#                              Log: $GWDG_WORKSPACE/head-<jobid>.out
+#   --head-mem SIZE            Memory for the --submit head job. Default: 16G
+#   --head-time HH:MM:SS       Time limit for the --submit head job. Default: 12:00:00
 #   -h, --help                 Show this help and exit
 #
 # Anything after a literal `--` is forwarded verbatim to `nextflow run`,
@@ -76,6 +91,10 @@ GWDG_PROXY="${GWDG_PROXY:-http://www-cache.gwdg.de:3128}"
 WS_FS="${GWDG_WS_FS:-ceph-ssd}"
 WS_NAME="${GWDG_WS_NAME:-genome-skim}"
 WS_DAYS="${GWDG_WS_DAYS:-30}"
+PREPULL=false
+SUBMIT=false
+HEAD_MEM="16G"
+HEAD_TIME="12:00:00"
 NF_EXTRA=()
 
 log() { printf '[run_gwdg] %s\n' "$*"; }
@@ -147,6 +166,10 @@ while [[ $# -gt 0 ]]; do
         -f|--filesystem)       WS_FS="$2";       shift 2 ;;
         -w|--workspace-name)   WS_NAME="$2";     shift 2 ;;
         -d|--workspace-days)   WS_DAYS="$2";     shift 2 ;;
+        --prepull)             PREPULL=true;     shift ;;
+        --submit)              SUBMIT=true;      shift ;;
+        --head-mem)            HEAD_MEM="$2";    shift 2 ;;
+        --head-time)           HEAD_TIME="$2";   shift 2 ;;
         -h|--help)             usage; exit 0 ;;
         --)                    shift; NF_EXTRA=("$@"); break ;;
         -*)                    die "unknown option: $1 (try --help)" ;;
@@ -242,6 +265,10 @@ fi
 
 APPTAINER_CACHEDIR="$GWDG_WORKSPACE/apptainer_cache"
 mkdir -p "$APPTAINER_CACHEDIR"
+# mksquashfs scratch for image builds/pulls. The default /tmp is RAM-backed
+# tmpfs on SCC login nodes, so multi-GB images can blow the memory cgroup.
+export APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-$GWDG_WORKSPACE/apptainer_tmp}"
+mkdir -p "$APPTAINER_TMPDIR"
 
 # Env vars consumed by conf/gwdg.config.
 export GWDG_WORKSPACE GWDG_PARTITION="$PARTITION" GWDG_CLUSTER_OPTS
@@ -331,6 +358,94 @@ else
     NF_ARGS+=( --input "$INPUT" )
 fi
 
+# --- Optional image pre-pull ---------------------------------------------
+# Image list comes from the pipeline itself (`nextflow inspect`), so it never
+# drifts from the pinned containers. Local .sif paths (RESPECT) are skipped.
+# Each image lands at the path Nextflow looks up in its cache (URI with / and
+# : replaced by -, plus .img), so Nextflow then skips the pull.
+prepull_images() {
+    local uri img
+    for uri in "$@"; do
+        img="$APPTAINER_CACHEDIR/${uri//[\/:]/-}.img"
+        if [[ -s "$img" ]]; then
+            echo "[prepull] cached: $uri"
+            continue
+        fi
+        echo "[prepull] pulling: $uri"
+        apptainer pull "$img" "docker://$uri"
+    done
+}
+if [[ "$PREPULL" == true ]]; then
+    log "resolving pipeline images (nextflow inspect)"
+    mapfile -t IMAGES < <(
+        nextflow inspect . "${NF_ARGS[@]}" \
+            | grep -o '"container":[[:space:]]*"[^"]*"' \
+            | sed 's/^"container":[[:space:]]*"//; s/"$//' \
+            | grep -v '^/' | sort -u
+    )
+    [[ ${#IMAGES[@]} -gt 0 ]] || die "nextflow inspect returned no container images"
+    log "pre-pulling ${#IMAGES[@]} images on an inet compute node"
+    PULL_EXTRA=()
+    [[ -n "$GWDG_CLUSTER_OPTS" ]] && read -r -a PULL_EXTRA <<< "$GWDG_CLUSTER_OPTS"
+    # Compute nodes only reach the registries with --constraint=inet + proxy.
+    [[ "$GWDG_CLUSTER_OPTS" == *--constraint* ]] || PULL_EXTRA+=( --constraint=inet )
+    [[ -n "$ACCOUNT" ]] && PULL_EXTRA+=( --account="$ACCOUNT" )
+    srun "${PULL_EXTRA[@]}" --partition="$PARTITION" --time=02:00:00 \
+         --cpus-per-task=4 --mem=32G \
+         bash -c "$(declare -f prepull_images); prepull_images \"\$@\"" _ "${IMAGES[@]}"
+fi
+
+# --- Launch: submitted head job (--submit) --------------------------------
+if [[ "$SUBMIT" == true ]]; then
+    HEAD_SCRIPT="$GWDG_WORKSPACE/head-$(date +%Y%m%d-%H%M%S).sbatch"
+    NF_BIN_DIR="$(dirname "$(command -v nextflow)")"
+    {
+        echo '#!/bin/bash'
+        echo "#SBATCH --job-name=skimflow-head"
+        echo "#SBATCH --partition=$PARTITION"
+        [[ "$GWDG_CLUSTER_OPTS" == *--constraint* ]] || echo "#SBATCH --constraint=inet"
+        echo "#SBATCH --cpus-per-task=4"
+        echo "#SBATCH --mem=$HEAD_MEM"
+        echo "#SBATCH --time=$HEAD_TIME"
+        echo "#SBATCH --output=$GWDG_WORKSPACE/head-%j.out"
+        [[ -n "$ACCOUNT" ]] && echo "#SBATCH --account=$ACCOUNT"
+        if [[ -n "$GWDG_CLUSTER_OPTS" ]]; then
+            read -r -a _opts <<< "$GWDG_CLUSTER_OPTS"
+            for _o in "${_opts[@]}"; do echo "#SBATCH $_o"; done
+        fi
+        echo 'type module >/dev/null 2>&1 || source /etc/profile'
+        echo 'module load openjdk/17 apptainer'
+        echo 'set -eo pipefail'
+        printf 'export PATH=%q:"$PATH"\n' "$NF_BIN_DIR"
+        for _v in GWDG_WORKSPACE GWDG_PARTITION GWDG_CLUSTER_OPTS GWDG_ACCOUNT GWDG_PROXY GWDG_BIND \
+                  APPTAINER_CACHEDIR NXF_APPTAINER_CACHEDIR APPTAINER_TMPDIR GUROBI_LIC \
+                  http_proxy https_proxy ftp_proxy; do
+            [[ -n "${!_v:-}" ]] && printf 'export %s=%q\n' "$_v" "${!_v}"
+        done
+        printf 'mkdir -p %q\n' "$GWDG_WORKSPACE/nxf_jtmp"
+        printf 'export NXF_OPTS=%q\n' "-Xms512m -Xmx8g -Djava.io.tmpdir=$GWDG_WORKSPACE/nxf_jtmp"
+        printf 'cd %q\n' "$REPO_DIR"
+        printf 'nextflow run .'
+        printf ' %q' "${NF_ARGS[@]}" "${NF_EXTRA[@]}"
+        printf '\n'
+    } > "$HEAD_SCRIPT"
+    JOB_ID="$(sbatch --parsable "$HEAD_SCRIPT")"
+    JOB_ID="${JOB_ID%%;*}"
+    log "submitted Nextflow head as job $JOB_ID ($HEAD_SCRIPT)"
+    log "head log     : $GWDG_WORKSPACE/head-$JOB_ID.out"
+    log "nextflow log : $REPO_DIR/.nextflow.log"
+    log "status       : squeue -j $JOB_ID   (cancel: scancel $JOB_ID)"
+    log "when it finishes, archive:  rsync -av \"$GWDG_WORKSPACE/results/\" ~/.project/<projectid>/genome-skim-results/"
+    log "then free the workspace (only after verifying the archive):  ws_release $WS_NAME"
+    exit 0
+fi
+
+# --- Launch: this shell (default) -----------------------------------------
+if [[ -n "$R1" || -n "$LONG_READS" || "$INPUT" != "$(abs_path "$REPO_DIR/assets/samplesheet_test.csv")" ]]; then
+    log "WARNING: running the Nextflow head in this shell. For real data on a login"
+    log "         node consider --submit (and --prepull): the login memory cap can"
+    log "         kill or hang a long-running head."
+fi
 nextflow run . "${NF_ARGS[@]}" "${NF_EXTRA[@]}"
 
 echo
