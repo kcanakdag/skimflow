@@ -11,11 +11,12 @@
 # the same container engine the pipeline uses, so no host tools are required
 # beyond the engine and nextflow.
 #
-# Example:
+# Example (placeholders: one high-coverage sample of your own; --genome-size is
+# its RESPECT estimate or a literature value):
 #   benchmarks/run_titration.sh \
-#       --r1 test_data/pmisa_small_R1.fastq.gz \
-#       --r2 test_data/pmisa_small_R2.fastq.gz \
-#       --genome-size 1200000000 \
+#       --r1 /path/to/highcov_R1.fastq.gz \
+#       --r2 /path/to/highcov_R2.fastq.gz \
+#       --genome-size <est_bp> \
 #       --coverages 0.05,0.1,0.25,0.5,1,2,5 \
 #       --seeds 3 --engine podman \
 #       --organelle-db results/mitogenome/getorganelle_db \
@@ -31,6 +32,11 @@
 #
 # titration.csv records both the requested and the achieved coverage (parsed
 # from rasusa's log). A failed level is reported as a WARN and skipped.
+#
+# Thesis input: the first 1,000,000 read pairs (taken with head, so no seed) of
+# the Bleidorn lab's Proceraea misakiensis (Pmisa) skim files
+# Pmisa_R{1,2}.cleaned.fastq.gz, run with --genome-size 1200000000. These reads
+# are not public and are not part of the repo.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,7 +54,7 @@ RASUSA_IMG="quay.io/biocontainers/rasusa:5.1.0--hfa8f182_0"
 NF_PASSTHROUGH=()
 
 usage() {
-    sed -n '2,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,39p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 

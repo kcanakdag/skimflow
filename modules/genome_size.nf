@@ -79,8 +79,8 @@ process RESPECT {
     # "it's skipped", drops the input, then exits 1 once every input was skipped
     # ("Number of processes must be at least 1"). That plain exit-1 hides the
     # underlying OOM, so the GWDG memory-scaling retry (which only fires on exit
-    # 130..143) never engages and one large library aborts the whole gated
-    # pipeline. Detect that signature and re-exit 137 so the retry kicks in at
+    # 130..143) never engages and one large library fails the whole run
+    # (errorStrategy terminate). Detect that signature and re-exit 137 so the retry kicks in at
     # the next memory tier. Same swallowed-OOM trap we guard in GetOrganelle.
     # The bare "it's skipped" text is NOT matched on its own: RESPECT also
     # prints it for not-a-file / invalid-extension inputs, which are not OOMs.

@@ -1,13 +1,15 @@
 # skimflow
 
-Nextflow pipeline that turns Illumina genome skims into assemblies, mitogenomes, and BUSCO marker scores. Built for animal biodiversity work in the Bleidorn group, University of Göttingen.
+Nextflow pipeline that turns genome skims (Illumina short reads, optionally long reads) into a RESPECT genome size/coverage estimate, MEGAHIT/Flye assemblies, annotated mitogenomes, BUSCO scores, mitochondrial phylogenies and a MultiQC report. Built for animal biodiversity work in the Bleidorn group, University of Göttingen.
+
+A step-by-step overview of the workflow graph, tools and containers is in [PIPELINE.txt](PIPELINE.txt).
 
 ## What it does
 
 From paired-end (or single-end) Illumina skim reads, skimflow produces:
 
-- **Trimmed reads** with fastp
-- **Genome size + coverage estimate** with RESPECT (the "is this data good enough?" gate)
+- **Adapter/quality trimming** with fastp (QC reports published; trimmed FASTQs kept only with `--save_trimmed_reads`)
+- **Genome size + coverage estimate** with RESPECT (a per-sample data-quality indicator in the report; it does not gate downstream steps)
 - **De novo assembly** with MEGAHIT (short reads) or Flye (long reads)
 - **Mitogenome** with GetOrganelle, annotated with MitoZ and MITOS2
 - **Per-gene mitochondrial multi-FASTAs** harvested from each sample's MITOS2 annotation and pooled across all samples into one file per gene (e.g. `COX1.fasta` with every species' COX1), plus a gene-occupancy matrix for downstream phylogenetics
@@ -23,7 +25,7 @@ From paired-end (or single-end) Illumina skim reads, skimflow produces:
 ```bash
 # 1. one-time setup
 podman build -t local/respect:0.2 -f containers/respect/Containerfile containers/respect
-./scripts/fetch_test_data.sh
+./scripts/fetch_test_data.sh --manifest assets/test_manifest.tsv   # 5 annelid skims (test profile)
 
 # 2. get a free academic Gurobi WLS licence from https://www.gurobi.com/academia/
 #    and save it to ~/gurobi.lic
@@ -33,6 +35,11 @@ nextflow run . -profile test,podman
 ```
 
 Other engines: `-profile test,docker` or `-profile test,apptainer`.
+
+The `test` profile runs five annelid skims subsampled from ENA
+(`assets/test_manifest.tsv`). For a quicker one-sample check, `-profile smoke,podman`
+runs a subsampled fish skim (DRR148567, fetched by `./scripts/fetch_test_data.sh`
+with no arguments) with the Chordata clade and genetic code 2.
 
 ### GWDG HPC (Göttingen)
 
@@ -104,6 +111,15 @@ curl -fsSL https://raw.githubusercontent.com/kcanakdag/skimflow/main/bootstrap_g
     | bash -s -- --partition standard96 --input my_samplesheet.csv
 ```
 
+SCC users: `scc-cpu` shares a 49-node QOS cap across all SCC accounts. If jobs
+sit in `PENDING (QOSGrpNodeLimit)`, rerun with `-p medium` and `-- -resume`
+(the partition is not part of the task hash, so finished tasks stay cached).
+
+For real data, add `--submit` so the Nextflow head runs as an sbatch job on a
+compute node (the login node's memory cap can kill a long-running head), and
+`--prepull` to pull every container image once inside a compute-node job before
+the run starts.
+
 Optional: copy the example environment file for repeated settings such as
 `GUROBI_LIC`, `KRAKEN2_DB`, `MITOS2_REFDIR`, or proxy settings:
 
@@ -133,7 +149,8 @@ demo,test_data/demo_R1.fastq.gz,test_data/demo_R2.fastq.gz,Bostrychus_sinensis,1
 - Empty `fastq_2` → single-end mode.
 - `species_id` is optional; it labels the harvested gene FASTAs and phylogeny tree tips and defaults to `sample_id` when blank.
 - `expected_genome_size_bp` is optional; if set, it appears alongside RESPECT's data-derived estimate in the MultiQC report as a sanity check.
-- Relative paths are resolved against the repo root.
+- `sample_id` may only contain letters, digits, `_` and `-` (`[A-Za-z0-9_-]`), since it names output files; ids must be unique.
+- Relative paths are resolved against the repo root, not the CSV's directory. Absolute paths, `~/` paths and URLs (`https://`, `s3://`, ...) are used as-is.
 - For a long-read sample, give the row a `long_reads` column (and optional `lr_type`) instead of `fastq_1`/`fastq_2`; see Optional steps below.
 
 Working example: `assets/samplesheet_test.csv`.
@@ -164,23 +181,25 @@ GWDG-only launcher flags:
 
 | Flag | Meaning |
 | --- | --- |
-| `--partition NAME` | Slurm partition, e.g. `scc-cpu`, `standard96`, or `standard96s`. |
+| `--partition NAME` | Slurm partition, default `scc-cpu`; `medium` for SCC when `scc-cpu` is full, `standard96` / `standard96s` for NHR. |
 | `--account ID` | Slurm account override; usually unnecessary. |
 | `--filesystem NAME` | Workspace filesystem, default `ceph-ssd`. |
 | `--workspace-name NAME` | Workspace name, default `genome-skim`. |
 | `--workspace-days N` | Initial workspace duration, default `30`. |
+| `--submit` | Run the Nextflow head as an sbatch job (log: `$GWDG_WORKSPACE/head-<jobid>.out`), then exit. |
+| `--prepull` | Pull all pipeline images into the Apptainer cache inside a compute-node job first. |
 
 Common Nextflow-only overrides:
 
 | Flag | Meaning |
 | --- | --- |
-| `--outdir DIR` | Results directory, default `results/`. |
+| `--outdir DIR` | Results directory, default `results/` in the repo; under `-profile gwdg` it defaults to `$GWDG_WORKSPACE/results`. |
 | `--save_trimmed_reads` | Publish fastp's trimmed FASTQs under `read_qc/`; off by default (large intermediates). |
-| `--busco_lineage NAME` | BUSCO lineage, default `metazoa_odb10`. |
+| `--busco_lineage NAME` | BUSCO lineage, default `metazoa_odb10`; e.g. `lophotrochozoa_odb12` for an annelid-focused set. |
 | `--busco_db DIR` | Existing BUSCO download directory. |
 | `--organelle_type NAME` | GetOrganelle target, default `animal_mt`. |
 | `--organelle_db DIR` | Existing GetOrganelle database directory. |
-| `--mitoz_clade NAME` | MitoZ clade, default `Arthropoda`. |
+| `--mitoz_clade NAME` | MitoZ clade, default `Annelida-segmented-worms`. |
 | `--mitoz_genetic_code N` | MitoZ mitochondrial genetic code, default `5`. |
 | `--mitos2_genetic_code N` | MITOS2 mitochondrial genetic code, default `5`. |
 | `--mitos2_refseqver NAME` | MITOS2 reference database version, default `refseq89m`. |
@@ -263,8 +282,11 @@ so every run picks it up without repeating the flag.
 ### Mitogenome annotation (MitoZ / MITOS2)
 
 When GetOrganelle produces a mitogenome FASTA, skimflow annotates it with both
-MitoZ and MITOS2. The defaults are for invertebrate mitochondrial genomes:
-MitoZ clade `Arthropoda`, genetic code `5`, and MITOS2 `refseq89m`.
+MitoZ and MITOS2. The defaults fit the thesis taxa (Syllidae, annelids): MitoZ
+clade `Annelida-segmented-worms`, invertebrate mitochondrial genetic code `5`,
+and MITOS2 `refseq89m`. Valid MitoZ clades are `Chordata`, `Arthropoda`,
+`Echinodermata`, `Annelida-segmented-worms`, `Bryozoa`, `Mollusca`,
+`Nematoda`, `Nemertea-ribbon-worms` and `Porifera-sponges`.
 
 For vertebrates, override the clade and genetic code:
 
@@ -322,9 +344,9 @@ runs rasusa inside the chosen container engine:
 
 ```bash
 benchmarks/run_titration.sh \
-    --r1 test_data/pmisa_small_R1.fastq.gz \
-    --r2 test_data/pmisa_small_R2.fastq.gz \
-    --genome-size 1200000000 \
+    --r1 /path/to/highcov_R1.fastq.gz \
+    --r2 /path/to/highcov_R2.fastq.gz \
+    --genome-size <est_bp> \
     --coverages 0.05,0.1,0.25,0.5,1,2,5 --seeds 3 --engine podman \
     --organelle-db results/mitogenome/getorganelle_db \
     --busco-db results/markers/busco_downloads \
@@ -339,21 +361,31 @@ GWDG, run the script inside an sbatch job with `--engine apptainer --profile gwd
 --outdir $(ws_find genome-skim)/titration`. `benchmarks/run_titration.sh --help`
 lists all options.
 
+The input is a single high-coverage sample of your own; `--genome-size` is its
+RESPECT estimate or a literature value. The thesis titration used the first
+1,000,000 read pairs (taken with `head`, so no seed) of the Bleidorn lab's
+*Proceraea misakiensis* (Pmisa) skim files `Pmisa_R{1,2}.cleaned.fastq.gz`, with
+`--genome-size 1200000000`. These reads are not public and are not in the repo.
+
 ## Output layout
 
-Everything lands under `results/`:
+Everything lands under `--outdir`: `results/` in the repo by default, or
+`$GWDG_WORKSPACE/results` under `-profile gwdg` (falling back to `./results`
+only if `GWDG_WORKSPACE` is unset).
 
 ```
 results/
 ├── read_qc/                 fastp JSON + HTML (trimmed reads only with --save_trimmed_reads)
 ├── decontam/<sample>/       kraken2 cleaned reads + report (when --kraken2_db is set)
-├── genome_size/<sample>/    RESPECT estimates
+├── genome_size/<sample>/    RESPECT estimates + respect_run.log
 ├── long_read_qc/<sample>/   Filtlong-filtered reads (long-read samples)
-├── assembly/<sample>/       MEGAHIT (short) or Flye (long) contigs + assembly_stats.tsv
+├── assembly/<sample>/       MEGAHIT (short) or Flye (long) contigs + assembly_stats.tsv,
+│                            plus <sample>.megahit.log or <sample>.flye_info.txt
 ├── mitogenome/<sample>/     GetOrganelle FASTA + log (short-read samples)
-├── mitogenome_annotation/   MitoZ / MITOS2 annotation outputs
+├── mitogenome_annotation/   MitoZ / MITOS2 annotation outputs + mitos2_refdata/ (shared)
 ├── genes/                   per-gene mito multi-FASTAs pooled across samples + occupancy matrix
-├── phylogeny/{nt,aa}/       per-gene alignments/trims, gene trees, supermatrix + species tree
+├── phylogeny/{nt,aa}/       per-gene alignments/trims, gene trees, supermatrix, species tree,
+│                            <type>.phylo_mqc.tsv + <type>_tree_mqc.html (report figure)
 ├── markers/<sample>/        BUSCO short_summary + full output
 ├── summary/                 skimflow_metrics.csv (one row per sample, all stages)
 ├── report/                  multiqc_report.html + multiqc_report_data/
@@ -383,6 +415,9 @@ Annotation output is:
 - `results/mitogenome_annotation/mitos2/<sample>/` for MITOS2 outputs,
   including `<sample>.mitos2.gff`, `<sample>.mitos2.bed`,
   `<sample>.mitos2.log.txt`, and `<sample>.mitos2.status.txt` when produced.
+- `results/mitogenome_annotation/mitos2_refdata/` is the downloaded MITOS2
+  reference data (skipped when `--mitos2_refdir` is set), shared by samples. It
+  is not a sample result.
 - `results/report/multiqc_report.html` includes mitogenome assembly and
   annotation summary tables.
 
@@ -422,6 +457,8 @@ Under `results/phylogeny/`, one subtree per sequence type (`nt/` and `aa/`):
   are the MAFFT alignment and trimAl-trimmed alignment for each gene.
   `<type>/alignments/<GENE>.mafft.log` is MAFFT's stderr, which names the
   strategy `--auto` chose (e.g. FFT-NS-2 or L-INS-i) for the methods section.
+  `<type>/trimmed/<GENE>.trim_fallback.txt` appears when trimAl failed on a
+  gene and its untrimmed alignment was used instead.
 - `<type>/gene_trees/<GENE>.treefile` is the per-gene ML tree (with `.iqtree`
   report and `.contree`); a gene with fewer than four taxa gets a
   `<GENE>.skipped.txt` instead.
@@ -429,7 +466,11 @@ Under `results/phylogeny/`, one subtree per sequence type (`nt/` and `aa/`):
   alignment and its per-gene partition file; `<type>/concat_stats.tsv` records
   taxa/genes/length.
 - `<type>/<type>_species.treefile` is the partitioned supermatrix species tree
-  (with `.contree`, `.iqtree`, and run log). Open it in FigTree or iTOL.
+  (with `.contree`, `.iqtree`, and run log). Open it in FigTree or iTOL. Trees
+  are unrooted; root them on an outgroup when you read them.
+- `<type>/<type>.phylo_mqc.tsv` (tree status, taxa, genes, length) and
+  `<type>/<type>_tree_mqc.html` (the rendered species tree) are the MultiQC
+  custom-content sections for the report.
 
 ### Per-sample metrics
 
@@ -459,6 +500,48 @@ section.
 | Report | MultiQC |
 
 All steps run in containers (Podman / Docker / Apptainer). No conda required at runtime.
+
+### Design decisions vs the brief
+
+The original brief named a slightly different tool set. The changes:
+
+- **MEGAHIT instead of SPAdes.** MEGAHIT needs much less memory and time on
+  skims of genomes up to about 1 Gbp, which matters on shared GWDG nodes. The
+  preset is a parameter (`--megahit_preset`, default `meta-sensitive`).
+- **No separate KMC step.** RESPECT counts k-mers itself with Jellyfish, so a
+  second k-mer counter adds nothing.
+- **No FastQC.** fastp writes its own HTML/JSON QC reports, and MultiQC
+  collects them.
+- **No BLAST+.** BUSCO (nuclear completeness) plus MitoZ/MITOS2 annotation
+  (mitochondrial genes) cover the marker step.
+- **fastp runs with its defaults** (fastp 1.3.3: automatic adapter detection,
+  quality and length filtering at the tool's default thresholds); no trimming
+  options are set by the pipeline.
+
+### Limitations
+
+- `MARKERS` runs BUSCO 6.0.0 in genome mode against `metazoa_odb10` (OrthoDB
+  v10, created 2024-01-08, 954 BUSCOs) as an assembly-completeness QC.
+  `--busco_lineage lophotrochozoa_odb12` is available for an annelid-focused
+  set; use one lineage for every sample in a comparison.
+- Per-BUSCO sequences are published under
+  `results/markers/<id>/<id>_busco/run_<lineage>/busco_sequences/` but are not
+  used in the phylogeny, which is built from mitochondrial genes only.
+- Nuclear rDNA (18S/28S) extraction and BLAST+ searches are not implemented.
+- Trees are unrooted.
+- The supermatrix keeps a gene only if it was aligned in at least
+  `--phylo_min_taxa_per_gene` samples (default 4); dropped genes are logged.
+
+## Testing
+
+The helper scripts under `bin/` have unit tests (stdlib only):
+
+```bash
+python3 -m unittest discover -s tests -t .
+```
+
+The pipeline itself is checked by running `-profile test,<engine>` and
+inspecting `results/`.
 
 ## License
 

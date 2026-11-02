@@ -2,23 +2,32 @@ skimflow: pipeline overview
 ===========================
 
 Input:  paired-end / single-end Illumina genome-skim reads, or long reads
-Output: trimmed reads, genome-size + coverage estimate, de novo assembly,
-        mitogenome + annotation, per-gene mito multi-FASTAs, BUSCO marker
-        scores, single-page MultiQC HTML report
+Output: read QC reports, genome-size + coverage estimate, de novo assembly +
+        contig stats, mitogenome + annotation, per-gene mito multi-FASTAs,
+        mitochondrial phylogenies (nt + aa), BUSCO marker scores, a
+        per-sample metrics table, single-page MultiQC HTML report
 
 A sample is short-read OR long-read, never both. Short-read samples take the
-RESPECT / GetOrganelle / annotation path; long-read samples take Filtlong +
-Flye. Both tracks rejoin at BUSCO and feed one report.
+RESPECT / GetOrganelle / annotation / phylogeny path; long-read samples take
+Filtlong + Flye. Both tracks rejoin at BUSCO and the contig stats, and feed one
+report.
+
+
+Input modes (mutually exclusive)
+--------------------------------
+
+  --input samplesheet.csv           multi-sample; columns sample_id, fastq_1,
+                                    fastq_2, species_id, expected_genome_size_bp
+                                    (short rows) or long_reads, lr_type (long rows)
+  --r1 R1.fq.gz [--r2 R2.fq.gz]     one short-read sample (sample_id derived
+                                    from the R1 file name unless --sample_id)
+  --long_reads reads.fq.gz          one long-read sample (--lr_type nanopore|pacbio)
 
 
 Workflow graph
 --------------
 
-  samplesheet.csv  (sample_id, fastq_1, fastq_2, species_id,
-                    expected_genome_size_bp; or long_reads, lr_type)
-        |
-        v
-  parseSamplesheet  -> channel of (meta, reads | long_reads)
+  parseSamplesheet / --r1 / --long_reads  -> channel of (meta, reads | long_reads)
         |
         +================ short-read track ================
         |
@@ -40,6 +49,8 @@ Workflow graph
         |        v                              |
         |   MITOGENOME_ANNOTATION               |
         |     (MitoZ + MITOS2)                  |
+        |        ^                              |
+        |     MITOS2_DB (downloaded once)       |
         |        |                              |
         |        v                              |
         |   MITO_GENES                          |
@@ -47,6 +58,13 @@ Workflow graph
         |        -> GENE_AGGREGATE (once)       |
         |        (per-gene multi-FASTAs +       |
         |         occupancy matrix)             |
+        |        |                              |
+        |        v                              |
+        |   PHYLOGENY  [skip: --skip_phylo]     |
+        |     ALIGN (MAFFT) -> TRIM (trimAl)    |
+        |       -> GENE_TREE (IQ-TREE, per gene)|
+        |       -> CONCAT -> SUPER_TREE         |
+        |          (IQ-TREE) -> TREE_PLOT       |
         |                                       |
         +================ long-read track ======|=========
         |                                       |
@@ -61,19 +79,29 @@ Workflow graph
                                   ^   (short + long contigs mixed)
                               BUSCO_DB (downloaded once)
 
-  All per-sample outputs --> REPORT (MultiQC)
+                              ASSEMBLY_STATS (contig stats per assembly)
+
+  SUMMARY_METRICS (once)
+      joins: fastp.json + RESPECT summary + assembly stats + GetOrganelle /
+             MitoZ / MITOS2 summaries + gene occupancy + BUSCO short_summary
+             + samplesheet metadata -> skimflow_metrics.csv
+
+  REPORT (MultiQC)
       collects: fastp.json + RESPECT summary + BUSCO short_summary +
                 kraken2 report + mitogenome/annotation summaries +
-                mito gene-occupancy table
+                mito gene-occupancy table + phylogeny tables and tree
+                figures + the per-sample metrics table
 
 
 Steps and tools
 ---------------
 
 1. READ_QC                   modules/read_qc.nf
-   Tool:      fastp
+   Tool:      fastp (run with its default trimming/filtering settings)
    Container: quay.io/biocontainers/fastp:1.3.3--h43da1c4_0
-   Purpose:   adapter trimming + quality filtering of raw FASTQs
+   Purpose:   adapter trimming + quality filtering of raw FASTQs. Only the
+              JSON/HTML reports are published; the trimmed FASTQs are kept
+              with --save_trimmed_reads.
 
 2. DECONTAM (optional)       modules/decontam.nf
    Tool:      kraken2
@@ -88,17 +116,20 @@ Steps and tools
               containers/respect/Containerfile, see below)
    Skip:      --skip_respect (also implicit for long-read-only runs)
    Purpose:   skim-data-specific estimator that produces both
-              genome size (bp) AND sequencing coverage (×) from the
-              raw k-mer profile, with repeat correction. Coverage is
-              the go/no-go signal; if it's too low, abort before
-              spending compute on assembly/markers.
+              genome size (bp) AND sequencing coverage (x) from the
+              k-mer profile, with repeat correction. Coverage is reported
+              per sample in the MultiQC report and the metrics table as a
+              data-quality indicator; it does not gate downstream steps,
+              which run in parallel regardless.
    Output:    estimated-parameters.txt (RESPECT native),
               <id>.genome_size.txt, <id>.coverage.txt,
-              <id>_respect_mqc.tsv (MultiQC custom-content table)
-   Note:      RESPECT requires the Gurobi optimisation solver. We
-              ship a custom container (micromamba + RESPECT + Gurobi)
-              and mount a free academic Gurobi WLS licence at
-              runtime. Get one at https://www.gurobi.com/academia/
+              <id>_respect_mqc.tsv (MultiQC custom-content table),
+              respect_run.log
+   Note:      RESPECT requires the Gurobi optimisation solver. The custom
+              container is python:3.8-slim + apt jellyfish (RESPECT's k-mer
+              counter) + pip RESPECT (pinned GitHub commit) and gurobipy.
+              A free academic Gurobi WLS licence is mounted at runtime,
+              never baked in. Get one at https://www.gurobi.com/academia/
               and save to ~/gurobi.lic (or set GUROBI_LIC=...).
 
 4. ASSEMBLY                  modules/assembly.nf
@@ -111,20 +142,27 @@ Steps and tools
    Container: quay.io/biocontainers/flye:2.9.6--py313h7fbb527_1
    LR_QC:     quay.io/biocontainers/filtlong:0.3.1--h077b44d_0
 
+   ASSEMBLY_STATS            modules/summary_metrics.nf
+   Purpose:   n contigs, total bp, N50, largest contig per assembly
+              (both tracks), written to <id>.assembly_stats.tsv
+
 5. MITO                      modules/mitogenome.nf
    Subworkflow: MITO_DB -> MITOGENOME
    Tool:      GetOrganelle
    Container: quay.io/biocontainers/getorganelle:1.7.7.1--pyhdfd78af_0
-   Note:      short-read only; errorStrategy 'ignore' so it fails
-              gracefully at low coverage.
+   Note:      short-read only. On exit codes 130-143 (OOM / walltime kill)
+              it retries up to 3 times with 16 GB x attempt memory, then
+              ignores the failure so one sample cannot stop the run.
 
 6. MITOGENOME_ANNOTATION     modules/mitogenome_annotation.nf
    Tools:     MitoZ + MITOS2  (run on the GetOrganelle mitogenome FASTA)
    Containers: docker.io/guanliangmeng/mitoz:3.6
                quay.io/biocontainers/mitos:2.1.10--pyhdfd78af_0
-   Defaults:  invertebrate mt (clade Arthropoda, genetic code 5);
-              override with --mitoz_clade / --mitoz_genetic_code /
-              --mitos2_genetic_code for vertebrates.
+   MITOS2_DB: downloads the MITOS2 reference data (refseq89m) once,
+              unless --mitos2_refdir is set
+   Defaults:  annelid mt (MitoZ clade Annelida-segmented-worms, genetic
+              code 5); override with --mitoz_clade / --mitoz_genetic_code /
+              --mitos2_genetic_code (e.g. Chordata + code 2 for vertebrates).
 
 7. MITO_GENES                modules/mito_genes.nf
    Tool:      bundled parsers bin/harvest_mito_genes.py +
@@ -143,13 +181,37 @@ Steps and tools
    Purpose:   give phylogenetics one alignment input per gene; stays useful
               when a full mitogenome assembly is too fragmentary.
 
-8. MARKER_EXTRACTION         modules/markers.nf
+8. PHYLOGENY                 modules/phylogeny.nf
+   Tools:     MAFFT (--mafft_args, default --auto), trimAl (--trimal_mode,
+              default automated1), IQ-TREE 2 (ModelFinder, UFBoot + SH-aLRT,
+              fixed --iqtree_seed), bin/concat_alignments.py,
+              bin/tree_to_svg.py
+   Containers: quay.io/biocontainers/mafft:7.525--h031d066_1
+               quay.io/biocontainers/trimal:1.5.1--h9948957_0
+               quay.io/biocontainers/iqtree:2.3.6--h503566f_1
+               docker.io/library/python:3.12 (CONCAT, TREE_PLOT)
+   Skip:      --skip_phylo
+   Purpose:   per gene and per sequence type (nt: 13 PCG + 2 rRNA, aa:
+              13 PCG): align, trim, optional gene tree; then concatenate
+              into a partitioned supermatrix (genes in fewer than
+              --phylo_min_taxa_per_gene samples dropped) and build an
+              unrooted ML species tree. Any tree with fewer than 4 taxa is
+              skipped with a note instead of failing the run.
+
+9. MARKER_EXTRACTION         modules/markers.nf
    Subworkflow: BUSCO_DB -> MARKERS
    Tool:      BUSCO
    Container: quay.io/biocontainers/busco:6.0.0--pyhdfd78af_3
-   Mode:      genome (run on MEGAHIT and Flye contigs)
+   Mode:      genome (run on MEGAHIT and Flye contigs), lineage
+              --busco_lineage (default metazoa_odb10)
 
-9. REPORT                    modules/report.nf
+10. SUMMARY_METRICS          modules/summary_metrics.nf
+   Tool:      bin/collect_metrics.py (stdlib only)
+   Container: docker.io/library/python:3.12
+   Output:    summary/skimflow_metrics.csv, one row per sample across all
+              stages, plus a MultiQC custom-content table
+
+11. REPORT                   modules/report.nf
    Tool:      MultiQC
    Container: quay.io/biocontainers/multiqc:1.34--pyhdfd78af_0
 
@@ -165,8 +227,9 @@ Combinable engine profiles (pick one for local runs):
 Site profile (self-contained, includes apptainer + SLURM):
   -profile gwdg         conf/gwdg.config         (env-var driven)
 
-Convenience profile:
-  -profile test         conf/test.config         (uses assets/samplesheet_test.csv)
+Convenience profiles:
+  -profile test         conf/test.config         (5 annelid skims, assets/samplesheet_test.csv)
+  -profile smoke        conf/smoke.config        (1 fish skim, assets/samplesheet_smoke.csv)
 
 All engine profiles auto-bind a Gurobi licence file from
 $GUROBI_LIC (default ~/gurobi.lic) into /opt/gurobi/gurobi.lic
@@ -183,11 +246,11 @@ One-time setup before first run
 
   # 2. Build the RESPECT container:
   podman build -t local/respect:0.2 -f containers/respect/Containerfile containers/respect
-  # or, on GWDG:
+  # or, on GWDG (scripts/run_gwdg.sh does this for you):
   apptainer build $APPTAINER_CACHEDIR/respect_0.2.sif containers/respect/respect.def
 
   # 3. Fetch test data:
-  ./scripts/fetch_test_data.sh
+  ./scripts/fetch_test_data.sh --manifest assets/test_manifest.tsv
 
   # 4. Run:
   nextflow run . -profile test,podman
@@ -196,9 +259,25 @@ One-time setup before first run
 Helper scripts
 --------------
 
-  scripts/fetch_test_data.sh   Subsamples real ENA reads (default DRR148567,
-                               Bostrychus sinensis, 50k pairs) into test_data/
+  scripts/fetch_test_data.sh   Subsamples public paired-end ENA runs into
+                               test_data/: one run (default DRR148567,
+                               Bostrychus sinensis, 50k pairs; smoke profile)
+                               or every row of a manifest (--manifest
+                               assets/test_manifest.tsv; test profile)
 
-  ~/bin/gnu-shim/date          Symlink to /usr/bin/gnudate, prepended to PATH
-                               in ~/.bashrc; works around uutils-coreutils
-                               on Ubuntu 25 breaking Nextflow's nxf_date.
+  scripts/run_gwdg.sh          GWDG launcher: loads modules, installs
+                               Nextflow, finds or allocates the workspace,
+                               builds the RESPECT .sif, checks the Gurobi
+                               licence, then runs -profile gwdg (--help)
+
+  bootstrap_gwdg.sh            Clones or updates the repo on GWDG, then
+                               hands off to scripts/run_gwdg.sh
+
+  benchmarks/run_titration.sh  Coverage-titration benchmark: down-samples one
+                               high-coverage sample with rasusa and runs the
+                               pipeline at each level (--help)
+
+  bin/*.py                     Stdlib helpers called by the processes:
+                               harvest_mito_genes.py, aggregate_mito_genes.py,
+                               concat_alignments.py, tree_to_svg.py,
+                               collect_metrics.py (unit tests in tests/)
