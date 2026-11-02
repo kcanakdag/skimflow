@@ -15,9 +15,12 @@ process FLYE {
     memory '32 GB'
     time '8h'
 
-    // Mirrors the existing assembly/mito tolerance for thin test data. On real
-    // long-read data this should succeed; long-read runs are deliberate, so
-    // switching to 'terminate' later is defensible.
+    // Mirrors the MITOGENOME/MARKERS 'ignore' tolerance for thin test data, so a
+    // failed Flye sample is dropped with a warning. The short-read MEGAHIT
+    // ASSEMBLY does not ignore errors: it inherits the global 'terminate'
+    // (gwdg: retry on exit 130-143, else terminate). On real long-read data
+    // this should succeed; long-read runs are deliberate, so switching to
+    // 'terminate' later is defensible.
     errorStrategy 'ignore'
 
     input:
