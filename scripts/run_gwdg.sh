@@ -8,8 +8,8 @@
 #   2. Falls back to installing Nextflow into ~/bin if there's no module.
 #   3. Finds (or allocates) a ceph-ssd workspace.
 #   4. Builds the RESPECT Apptainer image. SCC policy forbids container
-#      builds on login nodes, so on scc-* partitions the build runs inside
-#      an interactive srun job.
+#      builds on login nodes, so on every partition except NHR standard96*
+#      the build runs inside an interactive srun job.
 #   5. Checks the Gurobi licence file when short-read RESPECT is needed.
 #   6. Runs `nextflow run . -profile gwdg` with the chosen input.
 #
@@ -36,6 +36,9 @@
 #   --mitos2-refdir PATH       Pre-downloaded MITOS2 reference data directory (optional).
 #   -p, --partition NAME       SLURM partition. Default: scc-cpu
 #                              (NHR users: standard96 / standard96s)
+#                              SCC users: if scc-cpu jobs sit PENDING
+#                              (QOSGrpNodeLimit, shared 49-node cap), use
+#                              -p medium; add `-- -resume` to continue.
 #   -f, --filesystem NAME      Workspace filesystem. Default: ceph-ssd
 #                              (use ceph-hdd if you need >90 days total -
 #                              ceph-ssd hard caps at 30d × 2 extensions = 90d)
@@ -67,11 +70,8 @@ ACCOUNT="${GWDG_ACCOUNT:-}"
 GUROBI_LIC="${GUROBI_LIC:-$HOME/gurobi.lic}"
 SKIP_RESPECT="${SKIP_RESPECT:-false}"
 PARTITION="${GWDG_PARTITION:-scc-cpu}"
-if [[ -v GWDG_CLUSTER_OPTS ]]; then
-    GWDG_CLUSTER_OPTS="${GWDG_CLUSTER_OPTS}"
-else
-    GWDG_CLUSTER_OPTS="--constraint=inet"
-fi
+# `-` (not `:-`): an explicitly empty GWDG_CLUSTER_OPTS disables the constraint.
+GWDG_CLUSTER_OPTS="${GWDG_CLUSTER_OPTS-"--constraint=inet"}"
 GWDG_PROXY="${GWDG_PROXY:-http://www-cache.gwdg.de:3128}"
 WS_FS="${GWDG_WS_FS:-ceph-ssd}"
 WS_NAME="${GWDG_WS_NAME:-genome-skim}"
@@ -229,15 +229,16 @@ fi
 command -v nextflow >/dev/null 2>&1 || die "nextflow is not on PATH after module/install attempts"
 
 # --- Workspace -----------------------------------------------------------
-if ws_list 2>/dev/null | awk '{print $1}' | grep -qx "$WS_NAME"; then
-    GWDG_WORKSPACE="$(ws_find "$WS_NAME")"
+if GWDG_WORKSPACE="$(ws_find -F "$WS_FS" "$WS_NAME" 2>/dev/null)" && [[ -n "$GWDG_WORKSPACE" ]]; then
     log "reusing workspace: $GWDG_WORKSPACE"
 else
     log "allocating $WS_FS workspace '$WS_NAME' for $WS_DAYS days"
     ws_allocate -F "$WS_FS" "$WS_NAME" "$WS_DAYS" >/dev/null
-    GWDG_WORKSPACE="$(ws_find "$WS_NAME")"
+    GWDG_WORKSPACE="$(ws_find -F "$WS_FS" "$WS_NAME")"
     log "allocated: $GWDG_WORKSPACE"
 fi
+[[ -n "$GWDG_WORKSPACE" && -d "$GWDG_WORKSPACE" ]] || \
+    die "workspace '$WS_NAME' not found on $WS_FS after ws_allocate"
 
 APPTAINER_CACHEDIR="$GWDG_WORKSPACE/apptainer_cache"
 mkdir -p "$APPTAINER_CACHEDIR"
@@ -247,13 +248,12 @@ export GWDG_WORKSPACE GWDG_PARTITION="$PARTITION" GWDG_CLUSTER_OPTS
 [[ -n "$ACCOUNT" ]] && export GWDG_ACCOUNT="$ACCOUNT"
 export APPTAINER_CACHEDIR GUROBI_LIC
 export NXF_APPTAINER_CACHEDIR="$APPTAINER_CACHEDIR"
+# These reach the Nextflow head and `apptainer build` only. Task containers
+# get the proxy via the --env args in conf/gwdg.config apptainer.runOptions.
 if [[ -n "$GWDG_PROXY" ]]; then
     export http_proxy="${http_proxy:-$GWDG_PROXY}"
     export https_proxy="${https_proxy:-$GWDG_PROXY}"
     export ftp_proxy="${ftp_proxy:-$GWDG_PROXY}"
-    export APPTAINERENV_http_proxy="${APPTAINERENV_http_proxy:-$GWDG_PROXY}"
-    export APPTAINERENV_https_proxy="${APPTAINERENV_https_proxy:-$GWDG_PROXY}"
-    export APPTAINERENV_ftp_proxy="${APPTAINERENV_ftp_proxy:-$GWDG_PROXY}"
 fi
 
 # --- RESPECT container ---------------------------------------------------
@@ -267,9 +267,10 @@ if [[ "$HAS_SHORT_SAMPLES" != true ]]; then
 elif [[ "$SKIP_RESPECT" == true ]]; then
     log "skipping RESPECT image build (--skip-respect)"
 elif [[ ! -f "$RESPECT_SIF" ]]; then
-    if [[ "$PARTITION" == scc-* ]]; then
-        # SCC policy: don't build containers on login nodes.
-        log "building RESPECT image inside an srun job (SCC policy)"
+    if [[ "$PARTITION" != standard96* ]]; then
+        # SCC policy: don't build containers on login nodes. Only NHR
+        # standard96* builds directly; scc-cpu, medium and others use srun.
+        log "building RESPECT image inside an srun job (SCC policy / non-NHR partition)"
         SRUN_EXTRA=()
         [[ -n "$GWDG_CLUSTER_OPTS" ]] && read -r -a SRUN_EXTRA <<< "$GWDG_CLUSTER_OPTS"
         srun "${SRUN_EXTRA[@]}" --partition="$PARTITION" --time=00:30:00 \
@@ -336,5 +337,5 @@ echo
 log "done."
 # Persistent project storage on GWDG resolves through ~/.project/<projectid>/
 # rather than a guaranteed $PROJECT env var (see GWDG storage map docs).
-log "archive results:  rsync -av results/ ~/.project/<projectid>/genome-skim-results/"
-log "free workspace:   ws_release $WS_NAME"
+log "archive results:  rsync -av \"$GWDG_WORKSPACE/results/\" ~/.project/<projectid>/genome-skim-results/  (or your --outdir if passed after --)"
+log "free workspace (only after verifying the archive):  ws_release $WS_NAME"
