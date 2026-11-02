@@ -154,8 +154,8 @@ process SUPER_TREE {
     script:
     """
     set -euo pipefail
-    ntax=\$(grep -c '^>' ${supermatrix} 2>/dev/null || echo 0)
-    ngenes=\$(grep -c 'charset' ${partitions} 2>/dev/null || echo 0)
+    ntax=\$(grep -c '^>' ${supermatrix} 2>/dev/null || true); ntax=\${ntax:-0}
+    ngenes=\$(grep -c 'charset' ${partitions} 2>/dev/null || true); ngenes=\${ngenes:-0}
     alnlen=\$(awk 'NR==2{print length(\$0); exit}' ${supermatrix} 2>/dev/null || echo 0)
     alnlen=\${alnlen:-0}
 
