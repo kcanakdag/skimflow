@@ -1,0 +1,7 @@
+# id: respect_genome_size
+# section_name: "RESPECT (genome size + coverage)"
+# description: "Skim-data estimates from RESPECT. expected_size_bp is the samplesheet override (NA if not provided)."
+# format: "tsv"
+# plot_type: "table"
+Sample	genome_size_bp	coverage_x	expected_size_bp
+Pmisa	426769590	0.35	NA

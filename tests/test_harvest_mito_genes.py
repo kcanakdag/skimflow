@@ -9,6 +9,11 @@ FIX = os.path.join(os.path.dirname(__file__), 'fixtures', 'mitos2_OkadaiA')
 sys.path.insert(0, BIN)
 import harvest_mito_genes as h  # noqa: E402
 
+# Ten records copied verbatim from a real MITOS2 result.fas (D. melanogaster
+# test run): OH_N and OH_N-x control-region tags, trnX(anticodon) names, and
+# two PCGs.
+REAL_FIX = os.path.join(os.path.dirname(__file__), 'fixtures', 'mitos2_dmel_real')
+
 
 class TestCanonical(unittest.TestCase):
     def test_synonyms_map_to_canonical(self):
@@ -90,6 +95,35 @@ class TestParseAndSelect(unittest.TestCase):
         # whitespace -> '_' happens before illegal-char stripping, so the space
         # after 'sp.' becomes '_' and the '(', ')', ';' are dropped.
         self.assertEqual(h.sanitize_label('sp. (A);1'), 'sp._A1')
+
+
+class TestRealMitos2Headers(unittest.TestCase):
+    def setUp(self):
+        with open(os.path.join(REAL_FIX, 'result.fas')) as fh:
+            self.nt = list(h.parse_mitos_fasta(fh.read()))
+
+    def test_all_records_parsed(self):
+        self.assertEqual(len(self.nt), 10)
+        for r in self.nt:
+            self.assertEqual(r['seqid'], 'scaffold_1--1676+')
+            self.assertEqual(len(r['seq']), r['end'] - r['start'] + 1)
+
+    def test_oh_and_trna_map_to_none(self):
+        for r in self.nt:
+            if r['raw'].startswith(('OH', 'trn')):
+                self.assertIsNone(r['canon'], r['raw'])
+
+    def test_oh_combined_tag_split(self):
+        oh = {r['raw']: r for r in self.nt if r['raw'].startswith('OH')}
+        self.assertEqual((oh['OH_2-c']['frag'], oh['OH_2-c']['copy']), ('c', '2'))
+        self.assertEqual((oh['OH_1']['frag'], oh['OH_1']['copy']), (None, '1'))
+
+    def test_only_target_genes_selected(self):
+        feats = h.select_features(self.nt)
+        self.assertEqual(set(feats), {'nad4l', 'atp8'})
+        self.assertEqual((feats['nad4l']['start'], feats['nad4l']['end']), (6840, 7130))
+        self.assertEqual(len(feats['atp8']['seq']), 162)
+        self.assertFalse(feats['atp8']['merged'])
 
 
 def _rec(raw, start, end, strand, seq):

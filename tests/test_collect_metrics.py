@@ -4,6 +4,7 @@ import tempfile
 import unittest
 
 BIN = os.path.join(os.path.dirname(__file__), '..', 'bin')
+FIX = os.path.join(os.path.dirname(__file__), 'fixtures', 'metrics')
 sys.path.insert(0, BIN)
 import collect_metrics as cm  # noqa: E402
 
@@ -32,6 +33,40 @@ class TestBuscoId(unittest.TestCase):
             table = {}
             cm.parse_busco(d, table)
             self.assertEqual(list(table), ['Trypanosyllis_sp.1'])
+
+
+class TestRealFixtures(unittest.TestCase):
+    # Copied from real runs: a BUSCO 6 short_summary (pilot Syllis_okadai, work
+    # path shortened) and RESPECT MultiQC tables with and without an estimate.
+    def test_real_busco_summary(self):
+        table = {}
+        cm.parse_busco(os.path.join(FIX, 'busco'), table)
+        self.assertEqual(list(table), ['Syllis_okadai'])
+        r = table['Syllis_okadai']
+        self.assertEqual((r['busco_C'], r['busco_S'], r['busco_D'],
+                          r['busco_F'], r['busco_M']),
+                         ('73.2', '72.9', '0.3', '21.7', '5.1'))
+
+    def test_real_respect_values_and_na_passthrough(self):
+        table = {}
+        cm.parse_respect(os.path.join(FIX, 'respect'), table)
+        self.assertEqual(sorted(table), ['Paraopisthosyllis_rufa', 'Pmisa'])
+        self.assertEqual(table['Pmisa']['genome_size_bp'], '426769590')
+        self.assertEqual(table['Pmisa']['coverage_x'], '0.35')
+        self.assertEqual(table['Pmisa']['expected_size_bp'], 'NA')
+        rufa = table['Paraopisthosyllis_rufa']
+        self.assertEqual((rufa['genome_size_bp'], rufa['coverage_x']), ('NA', 'NA'))
+
+    def test_meta_fills_na_expected_size_from_respect(self):
+        table = {}
+        cm.parse_respect(os.path.join(FIX, 'respect'), table)
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'samples_meta.tsv'), 'w') as fh:
+                fh.write('Pmisa\tPlatynereis massiliensis\t1200000000\n')
+            cm.parse_meta(d, table)
+        self.assertEqual(table['Pmisa']['expected_size_bp'], '1200000000')
+        self.assertEqual(table['Pmisa']['species'], 'Platynereis_massiliensis')
+        self.assertEqual(table['Pmisa']['genome_size_bp'], '426769590')
 
 
 class TestMeta(unittest.TestCase):
