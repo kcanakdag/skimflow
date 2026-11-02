@@ -195,6 +195,8 @@ Common Nextflow-only overrides:
 | --- | --- |
 | `--outdir DIR` | Results directory, default `results/` in the repo; under `-profile gwdg` it defaults to `$GWDG_WORKSPACE/results`. |
 | `--save_trimmed_reads` | Publish fastp's trimmed FASTQs under `read_qc/`; off by default (large intermediates). |
+| `--respect_container IMAGE` | RESPECT image or `.sif` path, default `local/respect:0.2`. |
+| `--respect_strict true` | Fail the RESPECT task when it reports no estimate (NA); by default it warns and continues. |
 | `--busco_lineage NAME` | BUSCO lineage, default `metazoa_odb10`; e.g. `lophotrochozoa_odb12` for an annelid-focused set. |
 | `--busco_db DIR` | Existing BUSCO download directory. |
 | `--organelle_type NAME` | GetOrganelle target, default `animal_mt`. |
