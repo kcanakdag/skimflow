@@ -1,23 +1,24 @@
 // Genome-size + coverage estimation with RESPECT.
 //
 // RESPECT (Sarmashghi et al. 2021, PLOS Comput Biol) is a k-mer-based estimator
-// designed specifically for low-coverage skim data. From a single FASTQ
-// pair it produces:
+// designed specifically for low-coverage skim data. For each library it
+// reports (columns of respect_out/estimated-parameters.txt):
 //   - genome_length         : haploid genome size (bp)
-//   - sequencing_coverage   : per-base coverage (×)
+//   - coverage              : per-base coverage (x)
 //   - HCRM repeat profile   : high-copy repeat fraction (used internally)
-// The "is the data good enough?" decision is made on these two columns.
+// The "is the data good enough?" decision is made on genome_length and
+// coverage.
 //
 // RESPECT requires the Gurobi optimization solver (academic licence is
 // free via Gurobi WLS but not on biocontainers), so we run it inside a
 // custom container. See containers/respect/Containerfile for the build
-// recipe. The Gurobi licence file is supplied at runtime via:
-//   - params.gurobi_lic    -> bound into the container at /opt/gurobi/gurobi.lic
-//   - or env GRB_LICENSE_FILE pointing at the same path on the host.
+// recipe. The Gurobi licence file is supplied at runtime: the engine and
+// gwdg configs bind the host file named by env GUROBI_LIC (default
+// ~/gurobi.lic) into the container at /opt/gurobi/gurobi.lic.
 //
-// If params.expected_genome_size_bp is set in the samplesheet, RESPECT
-// is still run (we want its coverage estimate), but the override is
-// surfaced alongside in the MultiQC report as a sanity check.
+// If the samplesheet column expected_genome_size_bp is set (meta.expected_size),
+// RESPECT is still run (we want its coverage estimate), but the literature
+// value is surfaced alongside in the MultiQC report as a sanity check.
 
 process RESPECT {
     tag "${meta.id}"
@@ -39,6 +40,8 @@ process RESPECT {
     tuple val(meta), path(reads)
 
     output:
+    // Only `summary` is consumed downstream; the other outputs are convenience
+    // files kept so the published results/genome_size/<id>/ set stays stable.
     tuple val(meta), path("respect_out/estimated-parameters.txt"), emit: estimates
     tuple val(meta), path("${meta.id}.genome_size.txt"),           emit: size
     tuple val(meta), path("${meta.id}.coverage.txt"),              emit: coverage
@@ -46,15 +49,18 @@ process RESPECT {
     tuple val(meta), path("respect_out"),                          emit: dir
 
     script:
-    def reads_args = meta.single_end ? "${reads[0]}" : "${reads[0]} ${reads[1]}"
     def expected   = meta.expected_size ? "${meta.expected_size}" : 'NA'
+    // Stage ONE file per library under respect_in/ so we can hand RESPECT a -d
+    // argument (it scans for FASTQ inputs there). RESPECT treats every file as
+    // its own sample, so for paired-end data the mates are concatenated into a
+    // single file (multi-member gzip is valid and --decomp gzip reads it).
+    // coverage_x is therefore the depth of the pooled R1+R2 library.
+    def stage = meta.single_end
+        ? "ln -s \"\$(readlink -f ${reads[0]})\" respect_in/${meta.id}.fastq.gz"
+        : "cat ${reads[0]} ${reads[1]} > respect_in/${meta.id}.fastq.gz"
     """
     mkdir -p respect_in
-    # Stage the reads under a single directory so we can hand RESPECT a -d
-    # argument (it scans for FASTQ inputs there).
-    for f in ${reads_args}; do
-        ln -s "\$(readlink -f \$f)" respect_in/\$(basename \$f)
-    done
+    ${stage}
 
     # RESPECT CLI:
     #  -d <paths>      scan dirs for FASTQ inputs
@@ -94,23 +100,27 @@ process RESPECT {
     fi
 
     # RESPECT writes estimated-parameters.txt: tab-separated, header row
-    # then one row per input. Columns include:
-    #   sample, sequencing_depth, genome_length, ...
+    # then one row per input file. Header:
+    #   sample input_type sequence_type coverage genome_length uniqueness_ratio
+    #   HCRM sequencing_error_rate average_read_length
+    # We stage exactly one file per library, so exactly one row should match.
     # Pull the headline numbers for downstream consumers.
     python3 - <<'PY'
-import csv, os, pathlib
+import csv, pathlib
 out_dir = pathlib.Path('respect_out')
 est = out_dir / 'estimated-parameters.txt'
+sample = '${meta.id}'
 size_v, cov_v = 'NA', 'NA'
 with est.open() as fh:
-    rows = list(csv.DictReader(fh, delimiter='\\t'))
+    rows = [r for r in csv.DictReader(fh, delimiter='\\t')
+            if (r.get('sample') or '').startswith(sample)]
+if len(rows) > 1:
+    raise SystemExit(f'[genome_size] expected one RESPECT row for {sample}, found {len(rows)}')
 if rows:
     r = rows[0]
-    # RESPECT column names have varied across versions. Try the common ones.
-    size_v = r.get('genome_length') or r.get('genome_size') or 'NA'
-    cov_v  = r.get('sequencing_depth') or r.get('coverage') or 'NA'
+    size_v = r.get('genome_length') or 'NA'
+    cov_v  = r.get('coverage') or 'NA'
 
-sample = '${meta.id}'
 expected = '${expected}'
 with open(f'{sample}.genome_size.txt', 'w') as fh:
     fh.write(f'{sample}\\t{size_v}\\t{expected}\\n')
