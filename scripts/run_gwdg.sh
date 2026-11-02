@@ -159,6 +159,9 @@ done
 # The committed test CSV is the implicit default when none is given.
 [[ -n "$LONG_READS" && ( -n "$R1" || -n "$INPUT" ) ]] && \
     die "--long-reads is long-only; do not combine with --r1 or --input"
+[[ -n "$R1" && -n "$INPUT" ]] && \
+    die "--r1/--r2 is single-sample direct mode; do not combine with --input"
+[[ -n "$R2" && -z "$R1" ]] && die "--r2 requires --r1"
 
 if [[ -n "$R1" ]]; then
     [[ -f "$R1" ]] || die "R1 not found: $R1"

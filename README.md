@@ -131,6 +131,7 @@ demo,test_data/demo_R1.fastq.gz,test_data/demo_R2.fastq.gz,Bostrychus_sinensis,1
 ```
 
 - Empty `fastq_2` → single-end mode.
+- `species_id` is optional; it labels the harvested gene FASTAs and phylogeny tree tips and defaults to `sample_id` when blank.
 - `expected_genome_size_bp` is optional; if set, it appears alongside RESPECT's data-derived estimate in the MultiQC report as a sanity check.
 - Relative paths are resolved against the repo root.
 - For a long-read sample, give the row a `long_reads` column (and optional `lr_type`) instead of `fastq_1`/`fastq_2`; see Optional steps below.

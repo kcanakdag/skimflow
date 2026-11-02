@@ -53,7 +53,7 @@ def parseSamplesheet(csvPath) {
                     error "samplesheet: ${row.sample_id} lr_type '${lrt}' must be one of ${LR_TYPES()}"
                 def meta = [
                     id:            row.sample_id,
-                    species:       row.species_id ?: 'unknown',
+                    species:       row.species_id?.trim() ?: row.sample_id,
                     single_end:    true,
                     expected_size: expected_size,
                     read_type:     'long',
@@ -71,7 +71,7 @@ def parseSamplesheet(csvPath) {
             def reads  = r2 ? [r1, r2] : [r1]
             def meta = [
                 id:            row.sample_id,
-                species:       row.species_id ?: 'unknown',
+                species:       row.species_id?.trim() ?: row.sample_id,
                 single_end:    r2 == null,
                 expected_size: expected_size,
                 read_type:     'short',
@@ -82,19 +82,21 @@ def parseSamplesheet(csvPath) {
 }
 
 // Build a one-row channel from --r1/--r2 flags (short single-sample shortcut).
-// sample_id falls back to R1's basename with a trailing _R1/_1 stripped.
+// sample_id falls back to R1's basename with a trailing _R1/_1 (optionally
+// followed by Illumina's _001) stripped; a bare trailing digit such as in
+// sample01 or S11 is kept.
 def parseDirectReads() {
     def r1 = file(params.r1, checkIfExists: true)
     def r2 = params.r2 ? file(params.r2, checkIfExists: true) : null
     def reads = r2 ? [r1, r2] : [r1]
 
-    def derived_id = r1.simpleName.replaceAll(/[._-]?[Rr]?1$/, '')
+    def derived_id = r1.simpleName.replaceAll(/([._-]?[Rr]1|[._-]1)(_001)?$/, '')
     def id         = params.sample_id ?: (derived_id ?: r1.simpleName)
     def size_v     = params.expected_size ? params.expected_size.toString().toLong() : null
 
     def meta = [
         id:            id,
-        species:       params.species ?: id,
+        species:       params.species?.toString()?.trim() ?: id,
         single_end:    r2 == null,
         expected_size: size_v,
         read_type:     'short',
@@ -115,7 +117,7 @@ def parseDirectLong() {
 
     def meta = [
         id:            id,
-        species:       params.species ?: id,
+        species:       params.species?.toString()?.trim() ?: id,
         single_end:    true,
         expected_size: size_v,
         read_type:     'long',
@@ -129,6 +131,10 @@ workflow {
     // silently pick the first branch and never reach a "both given" error.
     if (params.long_reads && (params.r1 || params.input))
         error "--long_reads is long-only direct mode; do not combine with --r1 or --input"
+    if (params.r1 && params.input)
+        error "--r1/--r2 is single-sample direct mode; do not combine with --input"
+    if (params.r2 && !params.r1)
+        error "--r2 requires --r1"
 
     if (params.r1) {
         parsed_ch = parseDirectReads()       // short
