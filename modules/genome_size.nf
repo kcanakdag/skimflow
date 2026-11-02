@@ -31,9 +31,10 @@ process RESPECT {
     // scc-cpu node) and scale with attempt (32 -> 64 -> 96 -> 128 GB). The
     // script below re-exits 137 on a swallowed count OOM so this scaling
     // actually engages via the GWDG retry (exit 130..143); without that guard
-    // RESPECT's plain exit-1 masks the OOM and the retry never fires.
+    // RESPECT's plain exit-1 masks the OOM and the retry never fires. Walltime
+    // scales too (capped at 24 h) so a retried walltime kill gets more time.
     memory { 32.GB * task.attempt }
-    time '4h'
+    time { [4.h * task.attempt, 24.h].min() }
     maxRetries 3
 
     input:
@@ -47,6 +48,7 @@ process RESPECT {
     tuple val(meta), path("${meta.id}.coverage.txt"),              emit: coverage
     tuple val(meta), path("${meta.id}_respect_mqc.tsv"),           emit: summary
     tuple val(meta), path("respect_out"),                          emit: dir
+    tuple val(meta), path("respect_run.log"),                      emit: logfile
 
     script:
     def expected   = meta.expected_size ? "${meta.expected_size}" : 'NA'
@@ -80,6 +82,11 @@ process RESPECT {
     # 130..143) never engages and one large library aborts the whole gated
     # pipeline. Detect that signature and re-exit 137 so the retry kicks in at
     # the next memory tier. Same swallowed-OOM trap we guard in GetOrganelle.
+    # The bare "it's skipped" text is NOT matched on its own: RESPECT also
+    # prints it for not-a-file / invalid-extension inputs, which are not OOMs.
+    # A corrupt or truncated gzip also ends in "Number of processes ...", so
+    # decompression errors are checked first and propagate the plain exit code
+    # instead of burning retries at higher memory.
     rc=0
     OMP_NUM_THREADS=${task.cpus} \\
     respect \\
@@ -91,7 +98,11 @@ process RESPECT {
     cat respect_run.log
 
     if [ "\$rc" -ne 0 ]; then
-        if grep -qiE "it.s skipped|Number of processes must be at least 1|Killed|MemoryError|bad_alloc|Cannot allocate memory" respect_run.log; then
+        if grep -qE "EOFError|Compressed file ended|Not a gzipped file|BadGzipFile" respect_run.log; then
+            echo "[genome_size] RESPECT exit \$rc on a corrupt/truncated input -> propagating failure" >&2
+            exit \$rc
+        fi
+        if grep -qiE "Number of processes must be at least 1|Killed|MemoryError|bad_alloc|Cannot allocate memory" respect_run.log; then
             echo "[genome_size] RESPECT exit \$rc with a skipped-input/OOM signature -> re-exiting 137 so the GWDG memory-scaling retry engages" >&2
             exit 137
         fi
@@ -105,8 +116,14 @@ process RESPECT {
     #   HCRM sequencing_error_rate average_read_length
     # We stage exactly one file per library, so exactly one row should match.
     # Pull the headline numbers for downstream consumers.
+    # A header-only estimated-parameters.txt (or NA values) with exit 0 means
+    # RESPECT caught an estimation error itself (e.g. an expired Gurobi
+    # licence, or too little coverage). The NA is kept so the run carries on,
+    # but a warning with the relevant log lines goes to stderr and the log is
+    # published as respect_run.log. Set params.respect_strict = true to fail
+    # the task instead.
     python3 - <<'PY'
-import csv, pathlib
+import csv, pathlib, sys
 out_dir = pathlib.Path('respect_out')
 est = out_dir / 'estimated-parameters.txt'
 sample = '${meta.id}'
@@ -120,6 +137,19 @@ if rows:
     r = rows[0]
     size_v = r.get('genome_length') or 'NA'
     cov_v  = r.get('coverage') or 'NA'
+
+missing = {'', 'na', 'nan', 'none'}
+if not rows or size_v.strip().lower() in missing or cov_v.strip().lower() in missing:
+    size_v = 'NA' if size_v.strip().lower() in missing else size_v
+    cov_v  = 'NA' if cov_v.strip().lower() in missing else cov_v
+    print(f'[genome_size] WARNING: RESPECT produced no estimate for {sample}; see respect_run.log', file=sys.stderr)
+    keys = ('error occurred', 'traceback', 'licence', 'license', 'gurobi')
+    with open('respect_run.log', errors='replace') as lf:
+        for line in lf:
+            if any(k in line.lower() for k in keys):
+                print('  ' + line.rstrip(), file=sys.stderr)
+    if '${params.respect_strict}' == 'true':
+        sys.exit(1)
 
 expected = '${expected}'
 with open(f'{sample}.genome_size.txt', 'w') as fh:
