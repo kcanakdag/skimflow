@@ -205,10 +205,16 @@ process MITOS2_ANNOTATE {
 
     printf "%s\\n" "\$status" > ${meta.id}.mitos2.status.txt
 
-    gff=\$(find ${meta.id}.mitos2 -type f \\( -name "*.gff" -o -name "*.gff3" \\) | head -1 || true)
-    bed=\$(find ${meta.id}.mitos2 -type f -name "*.bed" | head -1 || true)
+    # MITOS2 writes one subdirectory (0/, 1/, ...) per input sequence, so a
+    # mitogenome in several pieces has one GFF/BED per piece: merge them all.
+    find ${meta.id}.mitos2 -type f \\( -name "*.gff" -o -name "*.gff3" \\) | sort -V > gff_list.txt
+    find ${meta.id}.mitos2 -type f -name "*.bed" | sort -V > bed_list.txt
+    gff=""
+    if [ -s gff_list.txt ]; then
+        xargs cat < gff_list.txt | awk '/^##gff-version/ { if (seen++) next } 1' > ${meta.id}.mitos2.gff
+        gff=${meta.id}.mitos2.gff
+    fi
     if [ -n "\$gff" ]; then
-        cp "\$gff" ${meta.id}.mitos2.gff
         gff_out="yes"
         # MITOS2 GFF marks protein-coding genes as feature type "gene" (tRNA and
         # rRNA use their own types plus ncRNA_gene), so "gene" is the CDS
@@ -225,8 +231,8 @@ process MITOS2_ANNOTATE {
         rrna=0
         features=0
     fi
-    if [ -n "\$bed" ]; then
-        cp "\$bed" ${meta.id}.mitos2.bed
+    if [ -s bed_list.txt ]; then
+        xargs cat < bed_list.txt > ${meta.id}.mitos2.bed
     fi
 
     if [ "\$status" -ne 0 ]; then

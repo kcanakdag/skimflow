@@ -126,9 +126,9 @@ class TestRealMitos2Headers(unittest.TestCase):
         self.assertFalse(feats['atp8']['merged'])
 
 
-def _rec(raw, start, end, strand, seq):
+def _rec(raw, start, end, strand, seq, seqid='c1'):
     base, frag, copy = h.split_tags(raw)
-    return {'seqid': 'c1', 'start': start, 'end': end, 'strand': strand,
+    return {'seqid': seqid, 'start': start, 'end': end, 'strand': strand,
             'raw': raw, 'canon': h.canonical_gene(raw), 'frag': frag,
             'copy': copy, 'seq': seq}
 
@@ -151,6 +151,18 @@ class TestCopyFragmentSelection(unittest.TestCase):
         self.assertEqual(feats['rrns']['seq'], 'G' * 50 + 'T' * 40)
         self.assertTrue(feats['rrns']['merged'])
         self.assertEqual((feats['rrns']['start'], feats['rrns']['end']), (300, 439))
+
+    def test_fragments_on_different_sequences_not_joined(self):
+        recs = [_rec('rrnL-a', 10, 49, '+', 'A' * 40, seqid='c1'),
+                _rec('rrnL-b', 10, 69, '+', 'C' * 60, seqid='c2')]
+        feats = h.select_features(recs)
+        self.assertEqual(feats['rrnl']['seq'], 'C' * 60)
+
+    def test_aa_prefers_same_sequence(self):
+        nt = h.select_features([_rec('cox1', 1, 30, '+', 'A' * 30, seqid='c2')])
+        aa = h.select_aa(nt, [_rec('cox1', 1, 30, '+', 'WRONG', seqid='c1'),
+                              _rec('cox1', 1, 30, '+', 'RIGHT', seqid='c2')])
+        self.assertEqual(aa['cox1'], 'RIGHT')
 
     def test_combined_tag_gene_not_reported_absent(self):
         recs = [_rec('nad5_1-a', 10, 39, '+', 'A' * 30),
@@ -189,6 +201,20 @@ class TestCli(unittest.TestCase):
             for line in lines[1:]:
                 fields = line.split('\t')
                 self.assertIn(fields[2], expected_genes)
+
+    def test_reads_every_sequence_subdir(self):
+        # MITOS2 writes one subdirectory per input sequence; genes on the
+        # second piece of a two-piece mitogenome must not be lost.
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+            for i, (seqid, gene) in enumerate([('piece1', 'cox1'), ('piece2', 'nad5')]):
+                os.makedirs(os.path.join(d, str(i)))
+                with open(os.path.join(d, str(i), 'result.fas'), 'w') as fh:
+                    fh.write('>%s; 1-30; +; %s\n%s\n' % (seqid, gene, 'ATG' * 10))
+            h.main(['--mitos-dir', d, '--sample-id', 'S', '--species-id', 'Sp x',
+                    '--outdir', out])
+            seqs = os.listdir(os.path.join(out, 'seqs'))
+            self.assertIn('COX1__S.fna', seqs)
+            self.assertIn('NAD5__S.fna', seqs)
 
 
 if __name__ == '__main__':

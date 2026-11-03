@@ -127,11 +127,14 @@ def select_features(records):
         frag_groups = {}
         for r in recs:
             if r['frag'] is None:
-                cands.append({'seq': r['seq'], 'merged': False,
+                cands.append({'seq': r['seq'], 'merged': False, 'seqid': r['seqid'],
                               'start': r['start'], 'end': r['end']})
             else:
-                frag_groups.setdefault(r['copy'], []).append(r)
-        for copy, frags in frag_groups.items():
+                # Fragments only join within one sequence: a multi-sequence
+                # mitogenome gets one MITOS2 run per sequence, and copy tags
+                # restart in each.
+                frag_groups.setdefault((r['seqid'], r['copy']), []).append(r)
+        for (_seqid, copy), frags in frag_groups.items():
             # MITOS emits each fragment already in coding orientation, so coding
             # 5'->3' order is ascending genomic coordinate on the plus strand and
             # descending on the minus strand. Sort strand-aware so a minus-strand
@@ -142,6 +145,7 @@ def select_features(records):
                              % (canon, len(frags), copy if copy is not None else '-',
                                 ','.join(r['raw'] for r in frags)))
             cands.append({'seq': ''.join(r['seq'] for r in frags), 'merged': True,
+                          'seqid': frags[0]['seqid'],
                           'start': min(r['start'] for r in frags),
                           'end': max(r['end'] for r in frags)})
         best = max(cands, key=lambda c: len(c['seq']))
@@ -171,7 +175,8 @@ def select_aa(nt_features, aa_records):
         cands = aa_by_gene.get(canon, [])
         if not cands:
             continue
-        best = max(cands, key=lambda r: (_overlap(feat['start'], feat['end'], r['start'], r['end']),
+        best = max(cands, key=lambda r: (r['seqid'] == feat.get('seqid'),
+                                         _overlap(feat['start'], feat['end'], r['start'], r['end']),
                                          len(r['seq'])))
         out[canon] = best['seq']
     return out
@@ -192,14 +197,24 @@ def has_internal_stop(aa):
     return '*' in aa.rstrip('*')
 
 
-def find_result(mitos_dir, name):
-    direct = os.path.join(mitos_dir, name)
-    if os.path.isfile(direct):
-        return direct
-    for root, _dirs, files in os.walk(mitos_dir):
+def find_results(mitos_dir, name):
+    """Every `name` under mitos_dir, in a stable order. MITOS2 writes one
+    subdirectory (0/, 1/, ...) per input sequence, so a mitogenome in several
+    pieces has several result files and all of them hold genes."""
+    found = []
+    for root, dirs, files in os.walk(mitos_dir):
+        dirs.sort()
         if name in files:
-            return os.path.join(root, name)
-    return None
+            found.append(os.path.join(root, name))
+    return found
+
+
+def read_records(paths):
+    records = []
+    for path in paths:
+        with open(path) as fh:
+            records.extend(parse_mitos_fasta(fh.read()))
+    return records
 
 
 def main(argv=None):
@@ -214,18 +229,8 @@ def main(argv=None):
     seqs_dir = os.path.join(args.outdir, 'seqs')
     os.makedirs(seqs_dir, exist_ok=True)
 
-    fas = find_result(args.mitos_dir, 'result.fas')
-    faa = find_result(args.mitos_dir, 'result.faa')
-    if fas:
-        with open(fas) as fh:
-            nt_records = list(parse_mitos_fasta(fh.read()))
-    else:
-        nt_records = []
-    if faa:
-        with open(faa) as fh:
-            aa_records = list(parse_mitos_fasta(fh.read()))
-    else:
-        aa_records = []
+    nt_records = read_records(find_results(args.mitos_dir, 'result.fas'))
+    aa_records = read_records(find_results(args.mitos_dir, 'result.faa'))
 
     nt_features = select_features(nt_records)
     aa_seqs = select_aa(nt_features, aa_records)
