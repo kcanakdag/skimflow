@@ -27,6 +27,8 @@
 #   --expected-size BP         Optional expected genome size (bp), shown in the report.
 #   --mito-seed FASTA          GetOrganelle seed (close relative, e.g. a COX1 barcode)
 #                              for --r1 runs and samplesheet rows without mito_seed.
+#   --mito-seed-library FASTA  multi-species seed FASTA; each sample uses the records
+#                              named after its species, sample id or genus.
 #   --long-reads PATH          Long-read FASTQ for a single long-read sample.
 #                              Long-only direct mode; do not combine with --r1/--input.
 #   --lr-type NAME             Long-read tech: nanopore (default) or pacbio.
@@ -79,6 +81,7 @@ R2=""
 SAMPLE_ID=""
 SPECIES=""
 MITO_SEED=""
+MITO_SEED_LIB=""
 EXPECTED_SIZE=""
 LONG_READS=""
 LR_TYPE=""
@@ -157,6 +160,7 @@ while [[ $# -gt 0 ]]; do
         --sample-id)           SAMPLE_ID="$2";   shift 2 ;;
         --species)             SPECIES="$2";     shift 2 ;;
         --mito-seed)           MITO_SEED="$(realpath "$2")"; shift 2 ;;
+        --mito-seed-library)   MITO_SEED_LIB="$(realpath "$2")"; shift 2 ;;
         --expected-size)       EXPECTED_SIZE="$2"; shift 2 ;;
         --long-reads)          LONG_READS="$2";  shift 2 ;;
         --lr-type)             LR_TYPE="$2";     shift 2 ;;
@@ -333,6 +337,7 @@ else
     log "  samplesheet : $INPUT"
 fi
 [[ -n "$MITO_SEED" ]]         && log "  mito seed   : $MITO_SEED"
+[[ -n "$MITO_SEED_LIB" ]]     && log "  seed library: $MITO_SEED_LIB"
 [[ -n "$KRAKEN2_DB" ]]        && log "  kraken2 db  : $KRAKEN2_DB"
 [[ -n "$MITOS2_REFDIR" ]]     && log "  MITOS2 ref  : $MITOS2_REFDIR"
 [[ "$SKIP_RESPECT" == true ]] && log "  RESPECT     : skipped"
@@ -347,6 +352,7 @@ NF_ARGS=( -profile gwdg --respect_container "$RESPECT_SIF" )
 [[ "$SKIP_RESPECT" == true ]] && NF_ARGS+=( --skip_respect true )
 [[ -n "$KRAKEN2_DB" ]] && NF_ARGS+=( --kraken2_db "$KRAKEN2_DB" )
 [[ -n "$MITO_SEED" ]] && NF_ARGS+=( --mito_seed "$MITO_SEED" )
+[[ -n "$MITO_SEED_LIB" ]] && NF_ARGS+=( --mito_seed_library "$MITO_SEED_LIB" )
 [[ -n "$MITOS2_REFDIR" ]] && NF_ARGS+=( --mitos2_refdir "$MITOS2_REFDIR" )
 if [[ -n "$R1" ]]; then
     NF_ARGS+=( --r1 "$R1" )

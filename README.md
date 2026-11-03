@@ -152,7 +152,7 @@ demo,test_data/demo_R1.fastq.gz,test_data/demo_R2.fastq.gz,Bostrychus_sinensis,1
 - `sample_id` may only contain letters, digits, `_` and `-` (`[A-Za-z0-9_-]`), since it names output files; ids must be unique.
 - Relative paths are resolved against the repo root, not the CSV's directory. Absolute paths, `~/` paths and URLs (`https://`, `s3://`, ...) are used as-is.
 - For a long-read sample, give the row a `long_reads` column (and optional `lr_type`) instead of `fastq_1`/`fastq_2`; see Optional steps below.
-- `mito_seed` is optional: a FASTA from a close relative (same genus or closer; a COX1 barcode is enough) that GetOrganelle uses instead of its default seeds. Blank falls back to `--mito_seed`, then to the defaults. See "Mitogenome seeds" below.
+- `mito_seed` is optional: a FASTA from a close relative (same genus or closer; a COX1 barcode is enough) that GetOrganelle uses instead of its default seeds. Blank falls back to the sample's records in `--mito_seed_library`, then `--mito_seed`, then the defaults. See "Mitogenome seeds" below.
 
 Working example: `assets/samplesheet_test.csv`.
 
@@ -172,6 +172,7 @@ to Nextflow, so use the Nextflow spelling there.
 | `--species NAME` | `--species NAME` | Species label for direct runs. |
 | `--expected-size BP` | `--expected_size BP` | Expected genome size shown beside RESPECT's estimate. |
 | `--mito-seed FASTA` | `--mito_seed FASTA` | GetOrganelle seed for direct runs and samplesheet rows without `mito_seed`. |
+| `--mito-seed-library FASTA` | `--mito_seed_library FASTA` | Multi-species seed FASTA (e.g. COX1 per species); each sample uses the records named after its species, sample id or genus. |
 | `--long-reads PATH` | `--long_reads PATH` | One long-read FASTQ; skips RESPECT and GetOrganelle. |
 | `--lr-type nanopore|pacbio` | `--lr_type nanopore|pacbio` | Long-read technology for Flye mode selection. |
 | `--kraken2-db DIR` | `--kraken2_db DIR` | Enable Kraken2 decontamination for short reads. |
@@ -433,9 +434,18 @@ Two settings address this:
   pilargid genus map at 0% to another genus's mitogenome. A COX1 barcode of the
   specimen or a congener is the usual choice. The test sheet seeds the three
   pilargids with COX1 only (`assets/mito_seeds/`).
+- A seed library (`--mito_seed_library`) saves writing one seed file per
+  sample: one FASTA with a record per species, e.g. a COX1 set for a whole
+  family. Each sample without its own `mito_seed` uses the records whose name
+  matches its `species_id`, else its `sample_id`, else every record of the
+  same genus (the first word of `species_id`). Names are compared without
+  case, with spaces and underscores treated alike (`Syllis okadai` matches
+  `>Syllis_okadai`). Samples with no match fall back to `--mito_seed` or the
+  default seeds. Aligned FASTAs work too: gap characters are removed.
 
 The seed used per sample is listed in the `Seed` column of the
-"Mitogenome assembly" table in the report.
+"Mitogenome assembly" table in the report: `default`, `custom:<file>` or
+`library:<records>`.
 
 Annotation output is:
 

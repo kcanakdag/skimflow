@@ -11,9 +11,12 @@
 // FASTA (default: the bundled seed DB for organelle_type). For divergent taxa
 // the bundled animal_mt seeds can recruit no true mitochondrial reads at all;
 // the coverage estimate is then taken from nuclear hits and the run fails.
-// meta.mito_seed (samplesheet column or --mito_seed) replaces the default seed
-// with a close relative's sequence (same genus or closer; a COX1 barcode is
-// enough). The label DB used to judge the final graph stays the default.
+// meta.mito_seed replaces the default seed with a close relative's sequence
+// (same genus or closer; a COX1 barcode is enough). It comes from the
+// samplesheet column, from --mito_seed_library (then meta.mito_seed_records
+// names the records of that sample, chosen in main.nf by species, sample id or
+// genus), or from --mito_seed. Gap characters are removed, so aligned FASTAs
+// work as seeds. The label DB used to judge the final graph stays the default.
 
 process MITO_DB {
     tag "${organelle_type}"
@@ -73,8 +76,24 @@ process MITOGENOME {
 
     script:
     def in_args   = meta.single_end ? "-u ${reads[0]}" : "-1 ${reads[0]} -2 ${reads[1]}"
-    def seed_arg  = meta.mito_seed ? "-s ${seed}" : ''
-    def seed_name = meta.mito_seed ? "custom:${file(meta.mito_seed).name}" : 'default'
+    def recs      = meta.mito_seed_records ?: []
+    def seed_arg  = meta.mito_seed ? '-s seed_clean.fasta' : ''
+    def seed_name = !meta.mito_seed ? 'default'
+                  : recs ? "library:${recs.size() <= 2 ? recs.join('+') : recs[0] + '+' + (recs.size() - 1) + '_more'}"
+                  : "custom:${file(meta.mito_seed).name}"
+    // Keep the selected records (all when none are named) and drop alignment
+    // gap characters, which bowtie2 cannot index.
+    def seed_prep = meta.mito_seed ? """
+    awk -v want='${recs.join(' ')}' '
+        BEGIN { n = split(want, w, " "); for (i = 1; i <= n; i++) keep[w[i]] = 1 }
+        /^>/  { split(substr(\$0, 2), h, /[ \t]+/); p = (n == 0 || (h[1] in keep)); if (p) print; next }
+        p     { gsub(/[-.[:space:]]/, ""); if (length(\$0)) print }
+    ' ${seed} > seed_clean.fasta
+    if ! grep -q '^[^>]' seed_clean.fasta; then
+        echo "mito seed: no sequence selected from ${seed} (records: ${recs.join(' ') ?: 'all'})" >&2
+        exit 1
+    fi
+""" : ''
     // GetOrganelle subsamples reads to a target organelle coverage estimated
     // from the seed reads. A bad seed inflates that estimate (950x to 2471x on
     // the pilargid test set, true value ~40x) and most mito reads are dropped,
@@ -82,7 +101,7 @@ process MITOGENOME {
     def keep_arg  = params.mito_keep_all_reads ? '--reduce-reads-for-coverage inf --max-reads inf' : ''
     """
     set -euo pipefail
-
+    ${seed_prep}
     set +e
     GETORG_PATH=\$PWD/${db} \\
     get_organelle_from_reads.py \\

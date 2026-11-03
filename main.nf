@@ -39,16 +39,51 @@ def resolveSheetPath(String p) {
     "${projectDir}/${p}"
 }
 
-// Resolve the optional GetOrganelle seed FASTA for one short-read sample. A
-// samplesheet value follows the sheet path rule (resolveSheetPath); otherwise
-// --mito_seed (resolved against the launch dir) applies; neither => null, and
-// GetOrganelle uses its default seed database for params.organelle_type.
-def resolveMitoSeed(sheetVal, where) {
-    def p = sheetVal ? resolveSheetPath(sheetVal) : params.mito_seed
-    if (!p) return null
-    def f = file(p.toString())
-    if (!f.exists()) error "${sheetVal ? where : '--mito_seed'}: mito_seed file not found: ${p}"
-    f.toString()
+// Normalise a species name or FASTA header for seed-library matching:
+// lower case, any run of non-alphanumerics becomes one '_'.
+def seedKey(s) {
+    s.toString().toLowerCase().replaceAll(/[^a-z0-9]+/, '_').replaceAll(/^_+|_+$/, '')
+}
+
+// Find a sample's records in the --mito_seed_library FASTA. Exact match on
+// species_id, then on sample_id, then every record of the same genus (first
+// word of species_id); same-genus seeds still recruit mito reads, other
+// genera do not. Returns the matching header names, or null.
+def matchSeedLibrary(lib, species, id) {
+    def names = file(lib).readLines()
+        .findAll { it.startsWith('>') }
+        .collect { it.substring(1).trim().tokenize(' \t')[0] }
+        .findAll { it }
+    def exact = [species, id].collect { q -> names.findAll { seedKey(it) == seedKey(q) } }.find { it }
+    if (exact) return exact
+    def genus = seedKey(species).tokenize('_')[0]
+    def hit = genus ? names.findAll { seedKey(it).tokenize('_')[0] == genus } : []
+    hit ?: null
+}
+
+// Resolve the optional GetOrganelle seed for one short-read sample, as a map
+// [file: path string or null, records: header names to use or null = all].
+// Order: samplesheet mito_seed (sheet path rule) > the sample's records in
+// --mito_seed_library > --mito_seed > none (GetOrganelle's default seeds for
+// params.organelle_type).
+def resolveMitoSeed(sheetVal, where, species, id) {
+    if (sheetVal) {
+        def f = file(resolveSheetPath(sheetVal))
+        if (!f.exists()) error "${where}: mito_seed file not found: ${f}"
+        return [file: f.toString(), records: null]
+    }
+    if (params.mito_seed_library) {
+        def lib = file(params.mito_seed_library.toString())
+        if (!lib.exists()) error "--mito_seed_library: file not found: ${lib}"
+        def recs = matchSeedLibrary(lib, species, id)
+        if (recs) return [file: lib.toString(), records: recs]
+    }
+    if (params.mito_seed) {
+        def f = file(params.mito_seed.toString())
+        if (!f.exists()) error "--mito_seed: mito_seed file not found: ${f}"
+        return [file: f.toString(), records: null]
+    }
+    [file: null, records: null]
 }
 
 // Parse an expected genome size in bp. Blank means "not given" (null). Whole
@@ -108,6 +143,7 @@ def parseSamplesheet(csvPath) {
                     read_type:     'long',
                     lr_type:       lrt,
                     mito_seed:     null,
+                    mito_seed_records: null,
                 ]
                 return tuple(meta, [], lr)
             }
@@ -119,14 +155,17 @@ def parseSamplesheet(csvPath) {
             def f2     = r2_str ? resolveSheetPath(r2_str) : null
             def r2     = f2 ? file(f2, checkIfExists: true) : null
             def reads  = r2 ? [r1, r2] : [r1]
+            def species = row.species_id?.trim() ?: sid
+            def seed    = resolveMitoSeed(row.mito_seed?.trim(), "samplesheet: ${sid}", species, sid)
             def meta = [
-                id:            sid,
-                species:       row.species_id?.trim() ?: sid,
-                single_end:    r2 == null,
-                expected_size: expected_size,
-                read_type:     'short',
-                lr_type:       null,
-                mito_seed:     resolveMitoSeed(row.mito_seed?.trim(), "samplesheet: ${sid}"),
+                id:                sid,
+                species:           species,
+                single_end:        r2 == null,
+                expected_size:     expected_size,
+                read_type:         'short',
+                lr_type:           null,
+                mito_seed:         seed.file,
+                mito_seed_records: seed.records,
             ]
             tuple(meta, reads, null)
         }
@@ -145,14 +184,17 @@ def parseDirectReads() {
     def id         = checkSampleId((params.sample_id ?: (derived_id ?: r1.simpleName)).toString().trim(), '--r1')
     def size_v     = parseExpectedSize(params.expected_size ?: null, '--expected_size')
 
+    def species = params.species?.toString()?.trim() ?: id
+    def seed    = resolveMitoSeed(null, '--mito_seed', species, id)
     def meta = [
-        id:            id,
-        species:       params.species?.toString()?.trim() ?: id,
-        single_end:    r2 == null,
-        expected_size: size_v,
-        read_type:     'short',
-        lr_type:       null,
-        mito_seed:     resolveMitoSeed(null, '--mito_seed'),
+        id:                id,
+        species:           species,
+        single_end:        r2 == null,
+        expected_size:     size_v,
+        read_type:         'short',
+        lr_type:           null,
+        mito_seed:         seed.file,
+        mito_seed_records: seed.records,
     ]
     Channel.of(tuple(meta, reads, null))
 }
@@ -175,6 +217,7 @@ def parseDirectLong() {
         read_type:     'long',
         lr_type:       lrt,
         mito_seed:     null,
+        mito_seed_records: null,
     ]
     Channel.of(tuple(meta, [], lr))
 }

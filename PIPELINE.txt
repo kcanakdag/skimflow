@@ -20,6 +20,8 @@ Input modes (mutually exclusive)
                                     fastq_2, species_id, expected_genome_size_bp
                                     (short rows) or long_reads, lr_type (long rows);
                                     optional mito_seed (GetOrganelle seed FASTA)
+  --mito_seed_library seeds.fasta   optional: one seed FASTA for all samples,
+                                    records picked by species, sample id or genus
   --r1 R1.fq.gz [--r2 R2.fq.gz]     one short-read sample (sample_id derived
                                     from the R1 file name unless --sample_id)
   --long_reads reads.fq.gz          one long-read sample (--lr_type nanopore|pacbio)
@@ -155,7 +157,9 @@ Steps and tools
               it retries up to 3 times with 16 GB and 4 h x attempt, then
               ignores the failure so one sample cannot stop the run.
               Keeps all reads by default (params.mito_keep_all_reads) and
-              uses meta.mito_seed as -s when set, else the default seeds.
+              uses meta.mito_seed as -s when set (samplesheet column, the
+              sample's records in --mito_seed_library, or --mito_seed, in that
+              order; gaps stripped), else the default seeds.
 
 6. MITOGENOME_ANNOTATION     modules/mitogenome_annotation.nf
    Tools:     MitoZ + MITOS2  (run on the GetOrganelle mitogenome FASTA)
