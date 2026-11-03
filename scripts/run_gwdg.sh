@@ -25,6 +25,8 @@
 #   --sample-id NAME           Override sample_id (default: derived from R1).
 #   --species NAME             Override species name (default: sample_id).
 #   --expected-size BP         Optional expected genome size (bp), shown in the report.
+#   --mito-seed FASTA          GetOrganelle seed (close relative, e.g. a COX1 barcode)
+#                              for --r1 runs and samplesheet rows without mito_seed.
 #   --long-reads PATH          Long-read FASTQ for a single long-read sample.
 #                              Long-only direct mode; do not combine with --r1/--input.
 #   --lr-type NAME             Long-read tech: nanopore (default) or pacbio.
@@ -76,6 +78,7 @@ R1=""
 R2=""
 SAMPLE_ID=""
 SPECIES=""
+MITO_SEED=""
 EXPECTED_SIZE=""
 LONG_READS=""
 LR_TYPE=""
@@ -153,6 +156,7 @@ while [[ $# -gt 0 ]]; do
         --r2)                  R2="$2";          shift 2 ;;
         --sample-id)           SAMPLE_ID="$2";   shift 2 ;;
         --species)             SPECIES="$2";     shift 2 ;;
+        --mito-seed)           MITO_SEED="$(realpath "$2")"; shift 2 ;;
         --expected-size)       EXPECTED_SIZE="$2"; shift 2 ;;
         --long-reads)          LONG_READS="$2";  shift 2 ;;
         --lr-type)             LR_TYPE="$2";     shift 2 ;;
@@ -328,6 +332,7 @@ elif [[ -n "$LONG_READS" ]]; then
 else
     log "  samplesheet : $INPUT"
 fi
+[[ -n "$MITO_SEED" ]]         && log "  mito seed   : $MITO_SEED"
 [[ -n "$KRAKEN2_DB" ]]        && log "  kraken2 db  : $KRAKEN2_DB"
 [[ -n "$MITOS2_REFDIR" ]]     && log "  MITOS2 ref  : $MITOS2_REFDIR"
 [[ "$SKIP_RESPECT" == true ]] && log "  RESPECT     : skipped"
@@ -341,6 +346,7 @@ echo
 NF_ARGS=( -profile gwdg --respect_container "$RESPECT_SIF" )
 [[ "$SKIP_RESPECT" == true ]] && NF_ARGS+=( --skip_respect true )
 [[ -n "$KRAKEN2_DB" ]] && NF_ARGS+=( --kraken2_db "$KRAKEN2_DB" )
+[[ -n "$MITO_SEED" ]] && NF_ARGS+=( --mito_seed "$MITO_SEED" )
 [[ -n "$MITOS2_REFDIR" ]] && NF_ARGS+=( --mitos2_refdir "$MITOS2_REFDIR" )
 if [[ -n "$R1" ]]; then
     NF_ARGS+=( --r1 "$R1" )

@@ -152,6 +152,7 @@ demo,test_data/demo_R1.fastq.gz,test_data/demo_R2.fastq.gz,Bostrychus_sinensis,1
 - `sample_id` may only contain letters, digits, `_` and `-` (`[A-Za-z0-9_-]`), since it names output files; ids must be unique.
 - Relative paths are resolved against the repo root, not the CSV's directory. Absolute paths, `~/` paths and URLs (`https://`, `s3://`, ...) are used as-is.
 - For a long-read sample, give the row a `long_reads` column (and optional `lr_type`) instead of `fastq_1`/`fastq_2`; see Optional steps below.
+- `mito_seed` is optional: a FASTA from a close relative (same genus or closer; a COX1 barcode is enough) that GetOrganelle uses instead of its default seeds. Blank falls back to `--mito_seed`, then to the defaults. See "Mitogenome seeds" below.
 
 Working example: `assets/samplesheet_test.csv`.
 
@@ -170,6 +171,7 @@ to Nextflow, so use the Nextflow spelling there.
 | `--sample-id NAME` | `--sample_id NAME` | Sample name for direct `--r1` or `--long-reads` runs. |
 | `--species NAME` | `--species NAME` | Species label for direct runs. |
 | `--expected-size BP` | `--expected_size BP` | Expected genome size shown beside RESPECT's estimate. |
+| `--mito-seed FASTA` | `--mito_seed FASTA` | GetOrganelle seed for direct runs and samplesheet rows without `mito_seed`. |
 | `--long-reads PATH` | `--long_reads PATH` | One long-read FASTQ; skips RESPECT and GetOrganelle. |
 | `--lr-type nanopore|pacbio` | `--lr_type nanopore|pacbio` | Long-read technology for Flye mode selection. |
 | `--kraken2-db DIR` | `--kraken2_db DIR` | Enable Kraken2 decontamination for short reads. |
@@ -201,6 +203,7 @@ Common Nextflow-only overrides:
 | `--busco_db DIR` | Existing BUSCO download directory. |
 | `--organelle_type NAME` | GetOrganelle target, default `animal_mt`. |
 | `--organelle_db DIR` | Existing GetOrganelle database directory. |
+| `--mito_keep_all_reads false` | Let GetOrganelle subsample reads to its estimated target coverage; default `true` (keep all reads). |
 | `--mitoz_clade NAME` | MitoZ clade, default `Annelida-segmented-worms`. |
 | `--mitoz_genetic_code N` | MitoZ mitochondrial genetic code, default `5`. |
 | `--mitos2_genetic_code N` | MITOS2 mitochondrial genetic code, default `5`. |
@@ -410,6 +413,30 @@ GetOrganelle mitogenome output is:
 
 Long-read samples do not run GetOrganelle in this pipeline.
 
+### Mitogenome seeds
+
+GetOrganelle starts from reads that bowtie2 maps to a seed FASTA, then extends
+them into an assembly graph. Its default `animal_mt` seeds are far from many
+invertebrates at the nucleotide level. On the Pilargidae in the test set they
+recruit no true mitochondrial reads (0 of 9,483 seed reads for *Synelmis* map to
+its own published mitogenome), even though the skims carry about 40x mito
+coverage. GetOrganelle then takes its coverage estimate from nuclear hits
+(950x to 2471x), drops most reads to meet that target, and fails.
+
+Two settings address this:
+
+- All reads are kept by default (`--reduce-reads-for-coverage inf
+  --max-reads inf`; turn off with `--mito_keep_all_reads false`), so a wrong
+  estimate cannot discard the mitochondrial reads.
+- A per-sample `mito_seed` (samplesheet column or `--mito_seed`) replaces the
+  default seeds. It must come from the same genus or closer: reads of one
+  pilargid genus map at 0% to another genus's mitogenome. A COX1 barcode of the
+  specimen or a congener is the usual choice. The test sheet seeds the three
+  pilargids with COX1 only (`assets/mito_seeds/`).
+
+The seed used per sample is listed in the `Seed` column of the
+"Mitogenome assembly" table in the report.
+
 Annotation output is:
 
 - `results/mitogenome_annotation/mitoz/<sample>/` for MitoZ outputs, including
@@ -531,6 +558,10 @@ The original brief named a slightly different tool set. The changes:
   used in the phylogeny, which is built from mitochondrial genes only.
 - Nuclear rDNA (18S/28S) extraction and BLAST+ searches are not implemented.
 - Trees are unrooted.
+- Without a close `mito_seed`, GetOrganelle's default seeds can miss the
+  mitogenome of divergent taxa even at good mito coverage (see "Mitogenome
+  seeds"). A seed taken from a published mitogenome of the same species makes
+  that sample's assembly reference-guided at the recruitment step.
 - The supermatrix keeps a gene only if it was aligned in at least
   `--phylo_min_taxa_per_gene` samples (default 4); dropped genes are logged.
 

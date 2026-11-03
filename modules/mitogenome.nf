@@ -6,6 +6,14 @@
 // channel: MITO_DB downloads it once into a directory that downstream
 // MITOGENOME calls mount as input. Set params.organelle_db to skip the
 // download (point at an existing GetOrganelle library directory).
+//
+// Seeding: GetOrganelle recruits its starting reads by bowtie2 against a seed
+// FASTA (default: the bundled seed DB for organelle_type). For divergent taxa
+// the bundled animal_mt seeds can recruit no true mitochondrial reads at all;
+// the coverage estimate is then taken from nuclear hits and the run fails.
+// meta.mito_seed (samplesheet column or --mito_seed) replaces the default seed
+// with a close relative's sequence (same genus or closer; a COX1 barcode is
+// enough). The label DB used to judge the final graph stays the default.
 
 process MITO_DB {
     tag "${organelle_type}"
@@ -40,7 +48,9 @@ process MITOGENOME {
     // ratio) and scale with attempt (16 -> 32 -> 48 -> 64 GB) so the GWDG
     // OOM-retry recovers instead of dropping the mitogenome.
     memory { 16.GB * task.attempt }
-    time '4h'
+    // Keeping all reads (params.mito_keep_all_reads) is slower on deep
+    // libraries, so the walltime also scales with the retry attempt.
+    time { 4.h * task.attempt }
     maxRetries 3
 
     // GetOrganelle can return non-zero when it cannot finish the assembly
@@ -53,7 +63,7 @@ process MITOGENOME {
     errorStrategy { task.attempt <= 3 && (task.exitStatus in 130..143) ? 'retry' : 'ignore' }
 
     input:
-    tuple val(meta),  path(reads)
+    tuple val(meta),  path(reads), path(seed, stageAs: 'mito_seed/*')
     tuple val(otype), path(db)
 
     output:
@@ -62,7 +72,14 @@ process MITOGENOME {
     tuple val(meta), path("${meta.id}.getorganelle_mqc.tsv"), emit: summary
 
     script:
-    def in_args = meta.single_end ? "-u ${reads[0]}" : "-1 ${reads[0]} -2 ${reads[1]}"
+    def in_args   = meta.single_end ? "-u ${reads[0]}" : "-1 ${reads[0]} -2 ${reads[1]}"
+    def seed_arg  = meta.mito_seed ? "-s ${seed}" : ''
+    def seed_name = meta.mito_seed ? "custom:${file(meta.mito_seed).name}" : 'default'
+    // GetOrganelle subsamples reads to a target organelle coverage estimated
+    // from the seed reads. A bad seed inflates that estimate (950x to 2471x on
+    // the pilargid test set, true value ~40x) and most mito reads are dropped,
+    // so by default every read is kept.
+    def keep_arg  = params.mito_keep_all_reads ? '--reduce-reads-for-coverage inf --max-reads inf' : ''
     """
     set -euo pipefail
 
@@ -71,6 +88,8 @@ process MITOGENOME {
     get_organelle_from_reads.py \\
         ${in_args} \\
         -F ${otype} \\
+        ${seed_arg} \\
+        ${keep_arg} \\
         -o mito_out \\
         -k 21,45,65,85,105 \\
         -t ${task.cpus} \\
@@ -128,8 +147,8 @@ cat > ${meta.id}.getorganelle_mqc.tsv <<EOF
 # section_name: "Mitogenome assembly"
 # description: "GetOrganelle mitochondrial FASTA summary."
 # plot_type: "table"
-Sample	Status	Sequences	Total_bp	Longest_bp	Topology	Path_FASTAs
-${meta.id}	\$status_label	\$seq_count	\$total_bp	\$longest_bp	\$topology	\$path_count
+Sample	Status	Sequences	Total_bp	Longest_bp	Topology	Path_FASTAs	Seed
+${meta.id}	\$status_label	\$seq_count	\$total_bp	\$longest_bp	\$topology	\$path_count	${seed_name}
 EOF
 
     exit 0
@@ -150,7 +169,11 @@ workflow MITO {
         db_ch = MITO_DB.out
     }
 
-    MITOGENOME(reads_ch, db_ch)
+    // Optional per-sample seed as a staged file; [] stages nothing.
+    seeded_ch = reads_ch.map { meta, reads ->
+        tuple(meta, reads, meta.mito_seed ? file(meta.mito_seed) : [])
+    }
+    MITOGENOME(seeded_ch, db_ch)
 
     emit:
     fasta   = MITOGENOME.out.fasta

@@ -1,6 +1,6 @@
-sample_id,fastq_1,fastq_2,species_id,expected_genome_size_bp
-Antonbruunia_milenae,test_data/Antonbruunia_milenae_R1.fastq.gz,test_data/Antonbruunia_milenae_R2.fastq.gz,Antonbruunia_milenae,
-Ancistrosyllis_sp,test_data/Ancistrosyllis_sp_R1.fastq.gz,test_data/Ancistrosyllis_sp_R2.fastq.gz,Ancistrosyllis_sp,
-Pilargis_wolfi,test_data/Pilargis_wolfi_R1.fastq.gz,test_data/Pilargis_wolfi_R2.fastq.gz,Pilargis_wolfi,
-Synelmis_amoureuxi,test_data/Synelmis_amoureuxi_R1.fastq.gz,test_data/Synelmis_amoureuxi_R2.fastq.gz,Synelmis_amoureuxi,
-Trypanobia_cryptica,test_data/Trypanobia_cryptica_R1.fastq.gz,test_data/Trypanobia_cryptica_R2.fastq.gz,Trypanobia_cryptica,
+sample_id,fastq_1,fastq_2,species_id,expected_genome_size_bp,mito_seed
+Antonbruunia_milenae,test_data/Antonbruunia_milenae_R1.fastq.gz,test_data/Antonbruunia_milenae_R2.fastq.gz,Antonbruunia_milenae,,
+Ancistrosyllis_sp,test_data/Ancistrosyllis_sp_R1.fastq.gz,test_data/Ancistrosyllis_sp_R2.fastq.gz,Ancistrosyllis_sp,,assets/mito_seeds/Ancistrosyllis_sp_COX1.fasta
+Pilargis_wolfi,test_data/Pilargis_wolfi_R1.fastq.gz,test_data/Pilargis_wolfi_R2.fastq.gz,Pilargis_wolfi,,assets/mito_seeds/Pilargis_wolfi_COX1.fasta
+Synelmis_amoureuxi,test_data/Synelmis_amoureuxi_R1.fastq.gz,test_data/Synelmis_amoureuxi_R2.fastq.gz,Synelmis_amoureuxi,,assets/mito_seeds/Synelmis_amoureuxi_COX1.fasta
+Trypanobia_cryptica,test_data/Trypanobia_cryptica_R1.fastq.gz,test_data/Trypanobia_cryptica_R2.fastq.gz,Trypanobia_cryptica,,

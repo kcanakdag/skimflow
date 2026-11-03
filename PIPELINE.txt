@@ -18,7 +18,8 @@ Input modes (mutually exclusive)
 
   --input samplesheet.csv           multi-sample; columns sample_id, fastq_1,
                                     fastq_2, species_id, expected_genome_size_bp
-                                    (short rows) or long_reads, lr_type (long rows)
+                                    (short rows) or long_reads, lr_type (long rows);
+                                    optional mito_seed (GetOrganelle seed FASTA)
   --r1 R1.fq.gz [--r2 R2.fq.gz]     one short-read sample (sample_id derived
                                     from the R1 file name unless --sample_id)
   --long_reads reads.fq.gz          one long-read sample (--lr_type nanopore|pacbio)
@@ -151,8 +152,10 @@ Steps and tools
    Tool:      GetOrganelle
    Container: quay.io/biocontainers/getorganelle:1.7.7.1--pyhdfd78af_0
    Note:      short-read only. On exit codes 130-143 (OOM / walltime kill)
-              it retries up to 3 times with 16 GB x attempt memory, then
+              it retries up to 3 times with 16 GB and 4 h x attempt, then
               ignores the failure so one sample cannot stop the run.
+              Keeps all reads by default (params.mito_keep_all_reads) and
+              uses meta.mito_seed as -s when set, else the default seeds.
 
 6. MITOGENOME_ANNOTATION     modules/mitogenome_annotation.nf
    Tools:     MitoZ + MITOS2  (run on the GetOrganelle mitogenome FASTA)

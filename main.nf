@@ -39,6 +39,18 @@ def resolveSheetPath(String p) {
     "${projectDir}/${p}"
 }
 
+// Resolve the optional GetOrganelle seed FASTA for one short-read sample. A
+// samplesheet value follows the sheet path rule (resolveSheetPath); otherwise
+// --mito_seed (resolved against the launch dir) applies; neither => null, and
+// GetOrganelle uses its default seed database for params.organelle_type.
+def resolveMitoSeed(sheetVal, where) {
+    def p = sheetVal ? resolveSheetPath(sheetVal) : params.mito_seed
+    if (!p) return null
+    def f = file(p.toString())
+    if (!f.exists()) error "${sheetVal ? where : '--mito_seed'}: mito_seed file not found: ${p}"
+    f.toString()
+}
+
 // Parse an expected genome size in bp. Blank means "not given" (null). Whole
 // numbers in plain or scientific notation (1000000000, 1e9) are accepted;
 // anything else (1.5, 1,000, text) is a clear error instead of a silent NA.
@@ -53,8 +65,8 @@ def parseExpectedSize(v, where) {
 
 // Parse samplesheet.csv into a channel of tuple(meta, reads, lr).
 // Exactly one of reads (non-empty list => short) / lr (path => long) is
-// populated; meta.read_type records which. Two new optional columns are
-// backward compatible via splitCsv(header:true): long_reads, lr_type.
+// populated; meta.read_type records which. Optional columns (absent or blank
+// is fine via splitCsv(header:true)): long_reads, lr_type, mito_seed.
 def parseSamplesheet(csvPath) {
     // Validate ids eagerly so a bad sheet fails before any task runs, not at
     // the cross-sample steps after all per-sample compute.
@@ -95,6 +107,7 @@ def parseSamplesheet(csvPath) {
                     expected_size: expected_size,
                     read_type:     'long',
                     lr_type:       lrt,
+                    mito_seed:     null,
                 ]
                 return tuple(meta, [], lr)
             }
@@ -113,6 +126,7 @@ def parseSamplesheet(csvPath) {
                 expected_size: expected_size,
                 read_type:     'short',
                 lr_type:       null,
+                mito_seed:     resolveMitoSeed(row.mito_seed?.trim(), "samplesheet: ${sid}"),
             ]
             tuple(meta, reads, null)
         }
@@ -138,6 +152,7 @@ def parseDirectReads() {
         expected_size: size_v,
         read_type:     'short',
         lr_type:       null,
+        mito_seed:     resolveMitoSeed(null, '--mito_seed'),
     ]
     Channel.of(tuple(meta, reads, null))
 }
@@ -159,6 +174,7 @@ def parseDirectLong() {
         expected_size: size_v,
         read_type:     'long',
         lr_type:       lrt,
+        mito_seed:     null,
     ]
     Channel.of(tuple(meta, [], lr))
 }
