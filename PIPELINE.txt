@@ -159,7 +159,16 @@ Steps and tools
               Keeps all reads by default (params.mito_keep_all_reads) and
               uses meta.mito_seed as -s when set (samplesheet column, the
               sample's records in --mito_seed_library, or --mito_seed, in that
-              order; gaps stripped), else the default seeds.
+              order; gaps stripped), else, with params.mito_self_seed (default
+              true), the sample's own mito contigs from FIND_SEED, else the
+              default seeds.
+
+   FIND_SEED (modules/mito_seed.nf, GetOrganelle image): tblastn of
+              assets/mito_pcg_annelida.faa against the MEGAHIT contigs
+              (>= mito_seed_min_contig bp, code mito_seed_gencode);
+              bin/find_mito_seed.py drops hits with stops or < 30% query
+              coverage and keeps the deepest clean contigs (>= mito_seed_depth_frac
+              of the top depth) that add a gene not yet in the seed. errorStrategy ignore: failure = default seeds.
 
 6. MITOGENOME_ANNOTATION     modules/mitogenome_annotation.nf
    Tools:     MitoZ + MITOS2  (run on the GetOrganelle mitogenome FASTA)

@@ -268,10 +268,10 @@ workflow {
     }
 
     ASSEMBLY(clean_reads)        // MEGAHIT
-    MITO(clean_reads)
+    MITO(clean_reads, ASSEMBLY.out.contigs)
     MITOGENOME_ANNOTATION(MITO.out.fasta)
     mitogenome_summary_ch = MITO.out.summary
-        .mix(MITOGENOME_ANNOTATION.out.summary)
+        .mix(MITO.out.seed_summary, MITOGENOME_ANNOTATION.out.summary)
         .map { meta, f -> f }
         .collect()
         .ifEmpty([])

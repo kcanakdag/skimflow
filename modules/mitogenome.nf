@@ -18,6 +18,8 @@
 // genus), or from --mito_seed. Gap characters are removed, so aligned FASTAs
 // work as seeds. The label DB used to judge the final graph stays the default.
 
+include { FIND_SEED } from './mito_seed.nf'
+
 process MITO_DB {
     tag "${organelle_type}"
     container 'quay.io/biocontainers/getorganelle:1.7.7.1--pyhdfd78af_0'
@@ -66,7 +68,7 @@ process MITOGENOME {
     errorStrategy { task.attempt <= 3 && (task.exitStatus in 130..143) ? 'retry' : 'ignore' }
 
     input:
-    tuple val(meta),  path(reads), path(seed, stageAs: 'mito_seed/*')
+    tuple val(meta),  path(reads), path(seed, stageAs: 'mito_seed/*'), val(seed_src)
     tuple val(otype), path(db)
 
     output:
@@ -76,14 +78,18 @@ process MITOGENOME {
 
     script:
     def in_args   = meta.single_end ? "-u ${reads[0]}" : "-1 ${reads[0]} -2 ${reads[1]}"
-    def recs      = meta.mito_seed_records ?: []
-    def seed_arg  = meta.mito_seed ? '-s seed_clean.fasta' : ''
-    def seed_name = !meta.mito_seed ? 'default'
+    // seed_src: 'custom' / 'library' (meta.mito_seed), 'self' (FIND_SEED
+    // contigs from the sample's own assembly) or 'default' (no seed file).
+    def use_seed  = seed_src != 'default'
+    def recs      = seed_src == 'library' ? (meta.mito_seed_records ?: []) : []
+    def seed_arg  = use_seed ? '-s seed_clean.fasta' : ''
+    def seed_name = seed_src == 'default' ? 'default'
+                  : seed_src == 'self' ? 'self:own_assembly'
                   : recs ? "library:${recs.size() <= 2 ? recs.join('+') : recs[0] + '+' + (recs.size() - 1) + '_more'}"
                   : "custom:${file(meta.mito_seed).name}"
     // Keep the selected records (all when none are named) and drop alignment
     // gap characters, which bowtie2 cannot index.
-    def seed_prep = meta.mito_seed ? """
+    def seed_prep = use_seed ? """
     awk -v want='${recs.join(' ')}' '
         BEGIN { n = split(want, w, " "); for (i = 1; i <= n; i++) keep[w[i]] = 1 }
         /^>/  { split(substr(\$0, 2), h, /[ \t]+/); p = (n == 0 || (h[1] in keep)); if (p) print; next }
@@ -177,6 +183,7 @@ EOF
 workflow MITO {
     take:
     reads_ch         // channel: tuple(meta, reads)
+    contigs_ch       // channel: tuple(meta, contigs), the MEGAHIT assemblies (self-seeding)
 
     main:
     if (params.organelle_db) {
@@ -188,14 +195,38 @@ workflow MITO {
         db_ch = MITO_DB.out
     }
 
-    // Optional per-sample seed as a staged file; [] stages nothing.
-    seeded_ch = reads_ch.map { meta, reads ->
-        tuple(meta, reads, meta.mito_seed ? file(meta.mito_seed) : [])
+    // Seed per sample. A given seed (samplesheet, library, --mito_seed) is
+    // used directly; otherwise, with params.mito_self_seed, the sample waits
+    // for its assembly and FIND_SEED looks for its own mito contigs; else the
+    // default seeds ([] stages nothing).
+    split_ch = reads_ch.branch { meta, reads ->
+        given: meta.mito_seed
+        self:  params.mito_self_seed
+        plain: true
     }
-    MITOGENOME(seeded_ch, db_ch)
+    given_ch = split_ch.given.map { meta, reads ->
+        tuple(meta, reads, file(meta.mito_seed), meta.mito_seed_records ? 'library' : 'custom')
+    }
+    plain_ch = split_ch.plain.map { meta, reads -> tuple(meta, reads, [], 'default') }
+
+    if (params.mito_self_seed) {
+        ref_ch = Channel.value(file(params.mito_seed_ref, checkIfExists: true))
+        FIND_SEED(contigs_ch.join(split_ch.self).map { meta, contigs, reads -> tuple(meta, contigs) }, ref_ch)
+        self_ch = split_ch.self
+            .join(FIND_SEED.out.seed, remainder: true)
+            .filter { meta, reads, seed -> reads != null }
+            .map { meta, reads, seed -> seed ? tuple(meta, reads, seed, 'self') : tuple(meta, reads, [], 'default') }
+        seed_summary = FIND_SEED.out.summary
+    } else {
+        self_ch      = Channel.empty()
+        seed_summary = Channel.empty()
+    }
+
+    MITOGENOME(given_ch.mix(self_ch, plain_ch), db_ch)
 
     emit:
-    fasta   = MITOGENOME.out.fasta
-    logfile = MITOGENOME.out.logfile
-    summary = MITOGENOME.out.summary
+    fasta        = MITOGENOME.out.fasta
+    logfile      = MITOGENOME.out.logfile
+    summary      = MITOGENOME.out.summary
+    seed_summary = seed_summary
 }

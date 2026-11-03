@@ -204,6 +204,9 @@ Common Nextflow-only overrides:
 | `--busco_db DIR` | Existing BUSCO download directory. |
 | `--organelle_type NAME` | GetOrganelle target, default `animal_mt`. |
 | `--organelle_db DIR` | Existing GetOrganelle database directory. |
+| `--mito_self_seed false` | Do not seed GetOrganelle from the sample's own assembly; default `true`. |
+| `--mito_seed_ref FAA` | Protein queries for self-seeding, default `assets/mito_pcg_annelida.faa`. |
+| `--mito_seed_gencode N` | Genetic code for the self-seed search, default `5` (`2` for vertebrates). |
 | `--mito_keep_all_reads false` | Let GetOrganelle subsample reads to its estimated target coverage; default `true` (keep all reads). |
 | `--mitoz_clade NAME` | MitoZ clade, default `Annelida-segmented-worms`. |
 | `--mitoz_genetic_code N` | MitoZ mitochondrial genetic code, default `5`. |
@@ -442,10 +445,26 @@ Two settings address this:
   case, with spaces and underscores treated alike (`Syllis okadai` matches
   `>Syllis_okadai`). Samples with no match fall back to `--mito_seed` or the
   default seeds. Aligned FASTAs work too: gap characters are removed.
+- Samples that still have no seed are self-seeded (on by default; turn off
+  with `--mito_self_seed false`). `FIND_SEED` searches the sample's own MEGAHIT
+  contigs with the 13 mitochondrial proteins of eight annelids
+  (`assets/mito_pcg_annelida.faa`, tblastn under `--mito_seed_gencode`,
+  default 5). Hits with a stop codon (likely NUMTs) or covering less than 30%
+  of the protein are dropped. Mitochondrial contigs are far deeper than
+  nuclear ones, and a contaminant's mitogenome is usually shallower than the
+  sample's own, so the deepest clean contig anchors the choice: every clean
+  contig with at least `--mito_seed_depth_frac` (0.2) of its depth becomes
+  part of the seed, but only if it adds a gene the seed does not have yet (a
+  contig that only repeats genes is a second mitogenome or a nuclear copy).
+  The approach follows the seed extraction Mateo developed
+  for the syllid skims. If nothing is found, the default seeds are used.
+  Self-seeded samples wait for MEGAHIT before GetOrganelle starts.
 
 The seed used per sample is listed in the `Seed` column of the
 "Mitogenome assembly" table in the report: `default`, `custom:<file>` or
-`library:<records>`.
+`library:<records>` or `self:own_assembly`; the "Mitogenome seed search"
+table lists the contigs, depths and rejected hits of every self-seeded
+sample.
 
 Annotation output is:
 
