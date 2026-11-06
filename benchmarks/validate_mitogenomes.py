@@ -17,7 +17,7 @@ this reports:
 The GenBank FASTA and feature table are fetched with NCBI efetch into
 --ref-dir unless they are already there. blastn must be on PATH, or pass a
 command prefix, e.g. --blastn "podman run --rm -v $PWD:$PWD -w $PWD
-quay.io/biocontainers/blast:2.16.0--h66d330f_5 blastn".
+quay.io/biocontainers/blast:2.17.0--hb02a186_1 blastn".
 
 Stdlib only. Usage:
   benchmarks/validate_mitogenomes.py --results results --refs benchmarks/validation_refs.tsv \

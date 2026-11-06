@@ -1,0 +1,5 @@
+# Splits the species trees must contain (unrooted: either side of a branch).
+# Ancistrosyllis + Pilargis: 100/100 SH-aLRT/UFBoot in both trees of the reference run.
+tree	taxa
+nt	Ancistrosyllis_sp,Pilargis_wolfi
+aa	Ancistrosyllis_sp,Pilargis_wolfi

@@ -1,0 +1,12 @@
+# Thresholds for benchmarks/run_benchmark.sh, one row per sample of
+# benchmarks/samplesheet_benchmark.csv. Measured values from the reference run
+# (skimflow 08216f5 on GWDG, all samples self-seeded) are in the comments; thresholds leave
+# room for small run-to-run differences in assembly.
+# ref_cov 98.8/100/99.7/96.9/96.5, identity >= 99.97, MITOS2 genes 37/37/36/37/37,
+# one sequence each, length ratio 1.011/1.179/1.073/0.969/0.965.
+sample_id	min_ref_cov_pct	min_identity_pct	min_mitos2_genes	max_asm_seqs	min_length_ratio	max_length_ratio
+Antonbruunia_milenae	95	99.5	35	3	0.90	1.25
+Ancistrosyllis_sp	95	99.5	35	3	0.90	1.25
+Pilargis_wolfi	95	99.5	35	3	0.90	1.25
+Synelmis_amoureuxi	95	99.5	35	3	0.90	1.25
+Trypanobia_cryptica	95	99.5	35	3	0.90	1.25

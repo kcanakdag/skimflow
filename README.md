@@ -342,6 +342,40 @@ nextflow run . -profile podman --input my.csv \
     --phylo_min_taxa_per_gene 4
 ```
 
+### Benchmark: check your installation
+
+`benchmarks/run_benchmark.sh` runs the pipeline on five public annelid skims
+whose mitogenomes are on GenBank, and prints PASS or FAIL for each check. Use it
+after installing skimflow on a new machine, or after changing a tool version,
+to see whether the results are still the same.
+
+```bash
+benchmarks/run_benchmark.sh --engine podman      # or docker, apptainer
+# on GWDG, inside an sbatch job:
+benchmarks/run_benchmark.sh --engine apptainer --profile gwdg --outdir "$(ws_find genome-skim)/benchmark"
+```
+
+The script:
+
+1. downloads the test reads (`assets/test_manifest.tsv`) into `test_data/`,
+   skipping files that are already there;
+2. runs the pipeline on `benchmarks/samplesheet_benchmark.csv`, which gives no
+   seeds, so every mitogenome comes from self-seeding;
+3. compares each mitogenome with its GenBank record
+   (`benchmarks/validate_mitogenomes.py`, blastn in a container);
+4. checks the numbers against `benchmarks/expected.tsv` (reference coverage,
+   identity, MITOS2 gene count, number of pieces, length ratio) and the species
+   trees against `benchmarks/expected_splits.tsv`
+   (`benchmarks/check_benchmark.py`).
+
+The exit code is 0 only when every check passes. The report is in
+`<outdir>/benchmark_checks.txt` and the per-sample comparison in
+`<outdir>/validation.tsv` (default outdir `results_benchmark/`). RESPECT is
+skipped automatically when no Gurobi licence is found; the checks do not need
+it. The thresholds are set a little below the values of the reference run, so
+small differences between machines still pass but a lost gene or a broken
+assembly fails.
+
 ### Coverage-titration benchmark
 
 `benchmarks/run_titration.sh` down-samples one high-coverage sample to a ladder
@@ -604,8 +638,9 @@ The helper scripts under `bin/` have unit tests (stdlib only):
 python3 -m unittest discover -s tests -t .
 ```
 
-The pipeline itself is checked by running `-profile test,<engine>` and
-inspecting `results/`.
+The pipeline itself is checked end to end by the benchmark
+(`benchmarks/run_benchmark.sh`, see above), which runs the test data and
+compares the mitogenomes and trees with known answers.
 
 ## License
 
