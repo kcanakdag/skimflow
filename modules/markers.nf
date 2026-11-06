@@ -56,6 +56,23 @@ process MARKERS {
         --cpu ${task.cpus} \\
         --out ${meta.id}_busco \\
         --out_path .
+
+    # BUSCO writes one file per marker gene (about 1,500 per sample). On HPC
+    # file systems with a file-count quota this adds up fast, so pack the
+    # per-gene folders into one archive. Summaries, full_table.tsv and logs
+    # stay as plain files.
+    for run in ${meta.id}_busco/run_*; do
+        [ -d "\$run" ] || continue
+        packed=""
+        for sub in busco_sequences hmmer_output miniprot_output metaeuk_output .bbtools_output; do
+            [ -e "\$run/\$sub" ] && packed="\$packed \$sub"
+        done
+        if [ -n "\$packed" ]; then
+            tar -czf "\$run/details.tar.gz" -C "\$run" \$packed
+            ( cd "\$run" && rm -rf \$packed )
+        fi
+    done
+    rm -rf ${meta.id}_busco/tmp
     """
 }
 

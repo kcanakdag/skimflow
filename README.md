@@ -395,7 +395,7 @@ results/
 ├── genes/                   per-gene mito multi-FASTAs pooled across samples + occupancy matrix
 ├── phylogeny/{nt,aa}/       per-gene alignments/trims, gene trees, supermatrix, species tree,
 │                            <type>.phylo_mqc.tsv + <type>_tree_mqc.html (report figure)
-├── markers/<sample>/        BUSCO short_summary + full output
+├── markers/<sample>/        BUSCO short_summary, full_table, details.tar.gz
 ├── summary/                 skimflow_metrics.csv (one row per sample, all stages)
 ├── report/                  multiqc_report.html + multiqc_report_data/
 ├── pipeline_report.html     Nextflow execution report (resources per task)
@@ -582,9 +582,11 @@ The original brief named a slightly different tool set. The changes:
   v10, created 2024-01-08, 954 BUSCOs) as an assembly-completeness QC.
   `--busco_lineage lophotrochozoa_odb12` is available for an annelid-focused
   set; use one lineage for every sample in a comparison.
-- Per-BUSCO sequences are published under
-  `results/markers/<id>/<id>_busco/run_<lineage>/busco_sequences/` but are not
-  used in the phylogeny, which is built from mitochondrial genes only.
+- Per-BUSCO sequences and the hmmer/miniprot output are packed into
+  `results/markers/<id>/<id>_busco/run_<lineage>/details.tar.gz` (about 1,500
+  small files per sample would otherwise count against HPC file-count quotas).
+  They are not used in the phylogeny, which is built from mitochondrial genes
+  only.
 - Nuclear rDNA (18S/28S) extraction and BLAST+ searches are not implemented.
 - Trees are unrooted.
 - Without a close `mito_seed`, GetOrganelle's default seeds can miss the
