@@ -46,22 +46,34 @@ fetch_pair() {
 
     LINES=$((N_READS * 4))
 
-    # `head` closes its input after enough lines, which sends SIGPIPE upstream.
-    # Disable pipefail just for these two pipelines so curl/zcat exiting 141/23 is fine.
-    # curl then prints a harmless "(23) Failure writing output"; a real download
-    # failure is caught by the line-count check below.
-    set +o pipefail
-    curl -fsSL "$R1_URL" | zcat | head -n "$LINES" | gzip > "$R1_OUT"
-    curl -fsSL "$R2_URL" | zcat | head -n "$LINES" | gzip > "$R2_OUT"
-    set -o pipefail
+    # Write to .part files and move them into place only after the check, so a
+    # failed download never replaces or deletes reads that are already there.
+    # ENA sometimes answers 403 or drops the connection; retry a few times.
+    local attempt
+    for attempt in 1 2 3 4; do
+        # `head` closes its input after enough lines, which sends SIGPIPE upstream.
+        # Disable pipefail just for these two pipelines so curl/zcat exiting 141/23 is fine.
+        # curl then prints a harmless "(23) Failure writing output"; a real download
+        # failure is caught by the line-count check below.
+        set +o pipefail
+        curl -fsSL "$R1_URL" | zcat | head -n "$LINES" | gzip > "$R1_OUT.part"
+        curl -fsSL "$R2_URL" | zcat | head -n "$LINES" | gzip > "$R2_OUT.part"
+        set -o pipefail
 
-    n1=$(zcat "$R1_OUT" | wc -l)
-    n2=$(zcat "$R2_OUT" | wc -l)
-    if (( n1 == 0 || n1 % 4 != 0 || n1 != n2 )); then
-        echo "[fetch] download failed or truncated for ${ACC} (R1=${n1} R2=${n2} lines)" >&2
-        rm -f "$R1_OUT" "$R2_OUT"
-        return 1
-    fi
+        n1=$(zcat "$R1_OUT.part" | wc -l)
+        n2=$(zcat "$R2_OUT.part" | wc -l)
+        if (( n1 > 0 && n1 % 4 == 0 && n1 == n2 )); then
+            break
+        fi
+        echo "[fetch] download failed or truncated for ${ACC} (R1=${n1} R2=${n2} lines), attempt ${attempt}/4" >&2
+        rm -f "$R1_OUT.part" "$R2_OUT.part"
+        if (( attempt == 4 )); then
+            return 1
+        fi
+        sleep $((attempt * 30))
+    done
+    mv -f "$R1_OUT.part" "$R1_OUT"
+    mv -f "$R2_OUT.part" "$R2_OUT"
     if (( n1 < LINES )); then
         echo "[fetch] note: ${ACC} has only $((n1 / 4)) pairs (< ${N_READS})" >&2
     fi
