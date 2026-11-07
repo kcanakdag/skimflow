@@ -111,9 +111,11 @@ curl -fsSL https://raw.githubusercontent.com/kcanakdag/skimflow/main/bootstrap_g
     | bash -s -- --partition standard96 --input my_samplesheet.csv
 ```
 
-SCC users: `scc-cpu` shares a 49-node QOS cap across all SCC accounts. If jobs
-sit in `PENDING (QOSGrpNodeLimit)`, rerun with `-p medium` and `-- -resume`
-(the partition is not part of the task hash, so finished tasks stay cached).
+SCC users: `scc-cpu` is the only SCC CPU partition (`medium` was discontinued),
+and it shares a 49-node QOS cap across all SCC accounts. When it is full, jobs
+sit in `PENDING` until nodes free up; there is no other partition to move to.
+If the Nextflow head reaches its time limit while waiting, submit it again with
+`-- -resume`: finished tasks stay cached.
 
 For real data, add `--submit` so the Nextflow head runs as an sbatch job on a
 compute node (the login node's memory cap can kill a long-running head), and
@@ -184,7 +186,7 @@ GWDG-only launcher flags:
 
 | Flag | Meaning |
 | --- | --- |
-| `--partition NAME` | Slurm partition, default `scc-cpu`; `medium` for SCC when `scc-cpu` is full, `standard96` / `standard96s` for NHR. |
+| `--partition NAME` | Slurm partition, default `scc-cpu` (the only SCC CPU partition); `standard96` / `standard96s` for NHR. |
 | `--account ID` | Slurm account override; usually unnecessary. |
 | `--filesystem NAME` | Workspace filesystem, default `ceph-ssd`. |
 | `--workspace-name NAME` | Workspace name, default `genome-skim`. |

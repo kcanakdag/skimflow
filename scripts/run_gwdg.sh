@@ -43,9 +43,10 @@
 #   --mitos2-refdir PATH       Pre-downloaded MITOS2 reference data directory (optional).
 #   -p, --partition NAME       SLURM partition. Default: scc-cpu
 #                              (NHR users: standard96 / standard96s)
-#                              SCC users: if scc-cpu jobs sit PENDING
-#                              (QOSGrpNodeLimit, shared 49-node cap), use
-#                              -p medium; add `-- -resume` to continue.
+#                              SCC users: scc-cpu is the only SCC CPU
+#                              partition (medium was discontinued). When
+#                              its shared 49-node cap is full, jobs wait;
+#                              resubmit with `-- -resume` if the head times out.
 #   -f, --filesystem NAME      Workspace filesystem. Default: ceph-ssd
 #                              (use ceph-hdd if you need >90 days total -
 #                              ceph-ssd hard caps at 30d × 2 extensions = 90d)
@@ -304,7 +305,7 @@ elif [[ "$SKIP_RESPECT" == true ]]; then
 elif [[ ! -f "$RESPECT_SIF" ]]; then
     if [[ "$PARTITION" != standard96* ]]; then
         # SCC policy: don't build containers on login nodes. Only NHR
-        # standard96* builds directly; scc-cpu, medium and others use srun.
+        # standard96* builds directly; scc-cpu and others use srun.
         log "building RESPECT image inside an srun job (SCC policy / non-NHR partition)"
         SRUN_EXTRA=()
         [[ -n "$GWDG_CLUSTER_OPTS" ]] && read -r -a SRUN_EXTRA <<< "$GWDG_CLUSTER_OPTS"
