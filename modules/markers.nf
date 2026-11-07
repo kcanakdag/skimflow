@@ -30,12 +30,17 @@ process MARKERS {
     publishDir "${params.outdir}/markers", mode: 'copy', saveAs: { fn -> "${meta.id}/${fn}" }
 
     cpus 8
-    memory '12 GB'
-    time '4h'
+    // miniprot needs more than 12 GB on a large skim assembly (1.3 Gb of
+    // contigs was OOM-killed). BUSCO then exits 1, not 137, so the retry also
+    // fires on exit 1, with double the memory each time (12 -> 24 -> 48 GB).
+    // Only directives change here, so finished BUSCO tasks stay cached.
+    memory { 12.GB * (2 ** (task.attempt - 1)) }
+    time { [4.h * task.attempt, 24.h].min() }
+    maxRetries 2
 
-    // BUSCO can fail when a tiny test assembly has zero hits. Don't take
-    // the rest of the pipeline down with it.
-    errorStrategy 'ignore'
+    // BUSCO can also fail when a tiny test assembly has zero hits. After the
+    // retries, don't take the rest of the pipeline down with it.
+    errorStrategy { task.attempt <= 2 && (task.exitStatus == 1 || task.exitStatus in 130..143) ? 'retry' : 'ignore' }
 
     input:
     tuple val(meta),    path(contigs)
