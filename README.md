@@ -202,6 +202,8 @@ Common Nextflow-only overrides:
 | `--save_trimmed_reads` | Publish fastp's trimmed FASTQs under `read_qc/`; off by default (large intermediates). |
 | `--respect_container IMAGE` | RESPECT image or `.sif` path, default `local/respect:0.2`. |
 | `--respect_strict true` | Fail the RESPECT task when it reports no estimate (NA); by default it warns and continues. |
+| `--respect_max_forks N` | RESPECT tasks at once, default 2: the academic Gurobi WLS licence refuses a third session. |
+| `--respect_licence_retries N` | Times a task waits 5 min and retries after Gurobi refused a session, default 6. |
 | `--busco_lineage NAME` | BUSCO lineage, default `metazoa_odb10`; e.g. `lophotrochozoa_odb12` for an annelid-focused set. |
 | `--busco_db DIR` | Existing BUSCO download directory. |
 | `--organelle_type NAME` | GetOrganelle target, default `animal_mt`. |

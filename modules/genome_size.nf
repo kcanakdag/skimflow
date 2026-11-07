@@ -36,6 +36,11 @@ process RESPECT {
     memory { 32.GB * task.attempt }
     time { [4.h * task.attempt, 24.h].min() }
     maxRetries 3
+    // The free academic Gurobi WLS licence allows only a few sessions at a
+    // time (2 for ours). Extra RESPECT tasks are refused ("Too many
+    // sessions"), and RESPECT then exits 0 with no estimate. Run at most this
+    // many at once; the script below also waits and retries on a refusal.
+    maxForks params.respect_max_forks
 
     input:
     tuple val(meta), path(reads)
@@ -87,15 +92,30 @@ process RESPECT {
     # A corrupt or truncated gzip also ends in "Number of processes ...", so
     # decompression errors are checked first and propagate the plain exit code
     # instead of burning retries at higher memory.
+    #
+    # A refused Gurobi session ("Too many sessions", e.g. another run with the
+    # same licence, or a token still held by a killed task) is retried here
+    # after a pause, up to params.respect_licence_retries times. RESPECT exits
+    # 0 in that case, so only the log shows it.
     rc=0
-    OMP_NUM_THREADS=${task.cpus} \\
-    respect \\
-        --debug \\
-        --threads ${task.cpus} \\
-        --decomp gzip \\
-        -d respect_in \\
-        -o respect_out > respect_run.log 2>&1 || rc=\$?
-    cat respect_run.log
+    for try in \$(seq 0 ${params.respect_licence_retries}); do
+        rc=0
+        # a refused run leaves its k-mer files under tmp/; start clean
+        if [ "\$try" -gt 0 ]; then rm -rf respect_out tmp; fi
+        OMP_NUM_THREADS=${task.cpus} \\
+        respect \\
+            --debug \\
+            --threads ${task.cpus} \\
+            --decomp gzip \\
+            -d respect_in \\
+            -o respect_out > respect_run.log 2>&1 || rc=\$?
+        cat respect_run.log
+        grep -q "Too many sessions" respect_run.log || break
+        if [ "\$try" -lt ${params.respect_licence_retries} ]; then
+            echo "[genome_size] Gurobi licence refused a session (too many active); retry \$((try + 1)) of ${params.respect_licence_retries} in 5 min" >&2
+            sleep 300
+        fi
+    done
 
     if [ "\$rc" -ne 0 ]; then
         if grep -qE "EOFError|Compressed file ended|Not a gzipped file|BadGzipFile" respect_run.log; then
