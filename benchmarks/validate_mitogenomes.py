@@ -116,15 +116,21 @@ def parse_feature_table(text):
             cur = {'s': s, 'e': e, 'type': cols[2], 'q': {}}
             if cols[2] == 'gene':
                 gene_at[(s, e)] = cur
-            elif cols[2] in ('CDS', 'tRNA', 'rRNA'):
+            elif cols[2] in ('CDS', 'mRNA', 'tRNA', 'rRNA'):
                 feats.append(cur)
         elif cur is not None and len(cols) >= 5:
             cur['q'].setdefault(cols[3], cols[4])
+    # ENA assemblies (e.g. skim2mito) give protein genes as mRNA only; when a
+    # record has CDS features, its mRNAs would count every gene twice
+    if any(f['type'] == 'CDS' for f in feats):
+        feats = [f for f in feats if f['type'] != 'mRNA']
     out = []
     gene_by_start = {s: g for (s, _), g in gene_at.items()}
     for f in feats:
         g = gene_by_start.get(f['s'], {'q': {}})['q'].get('gene')
-        name = norm_gene(g) or norm_gene(f['q'].get('product'))
+        note = re.search(r'ID:transcript_([^;\s]+)', f['q'].get('note', ''))
+        name = (norm_gene(g) or norm_gene(f['q'].get('product'))
+                or norm_gene(note.group(1) if note else None))
         if name is None:
             continue
         strand = '-' if f['s'] > f['e'] else '+'
@@ -177,10 +183,15 @@ def content_summary(counts):
 
 
 def collapse_parts(features):
-    """Merge consecutive features with the same name (split genes like cox1-a/-b)."""
+    """Merge consecutive features with the same name (split genes like cox1-a/-b).
+
+    tRNAs are never merged: they are not split, and the two leucine (or
+    serine) tRNAs can be neighbours (gastropods: nad1 trnL2 trnL1 rrnL).
+    """
     out = []
     for f in features:
-        if out and out[-1][3] == f[3] and out[-1][2] == f[2]:
+        if (out and out[-1][3] == f[3] and out[-1][2] == f[2]
+                and not f[3].startswith('trn')):
             continue
         out.append(f)
     return out

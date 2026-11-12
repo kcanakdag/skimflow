@@ -39,6 +39,27 @@ class TestFeatureTable(unittest.TestCase):
         self.assertEqual(feats, [(10, 80, '+', 'trnL'), (100, 1200, '+', 'cox1'),
                                  (1500, 2000, '-', 'nad6')])
 
+    # skim2mito/ENA style: genes carry only a locus_tag, protein genes are
+    # mRNA features, the name sits in a note "ID:transcript_<gene>"
+    FT_ENA = ('>Feature emb|OZ1|\n'
+              '1\t70\tgene\n\t\t\tlocus_tag\tL1\n'
+              '1\t70\ttRNA\n\t\t\tnote\tID:transcript_trnL1;~source:mitfi\n'
+              '1\t70\texon\n\t\t\tstandard_name\ttrnL1\n'
+              '100\t900\tgene\n\t\t\tlocus_tag\tL2\n'
+              '100\t900\tmRNA\n\t\t\tnote\tID:transcript_nad1;~source:mitos\n'
+              '1000\t1900\trRNA\n\t\t\tnote\tID:transcript_rrnL;~source:mitfi\n')
+
+    def test_parse_ena_style(self):
+        feats = v.parse_feature_table(self.FT_ENA)
+        self.assertEqual(feats, [(1, 70, '+', 'trnL'), (100, 900, '+', 'nad1'),
+                                 (1000, 1900, '+', 'rrnL')])
+
+    def test_mrna_ignored_when_cds_present(self):
+        ft = ('>Feature gb|X|\n'
+              '100\t900\tmRNA\n\t\t\tproduct\tNADH dehydrogenase subunit 1\n'
+              '100\t900\tCDS\n\t\t\tproduct\tNADH dehydrogenase subunit 1\n')
+        self.assertEqual(v.parse_feature_table(ft), [(100, 900, '+', 'nad1')])
+
 
 class TestOrder(unittest.TestCase):
     def test_reverse_reading_is_same_adjacency(self):
@@ -54,6 +75,12 @@ class TestOrder(unittest.TestCase):
     def test_split_parts_collapse(self):
         feats = [(1, 5, '+', 'cox1'), (9, 12, '+', 'cox1'), (20, 30, '+', 'cox2')]
         self.assertEqual(v.order_of(feats), [('cox1', '+'), ('cox2', '+')])
+
+    def test_adjacent_trna_pair_not_collapsed(self):
+        # gastropods: nad1 trnL2 trnL1 rrnL; both leucine tRNAs must count
+        feats = [(1, 900, '-', 'nad1'), (901, 970, '-', 'trnL'),
+                 (971, 1040, '-', 'trnL'), (1041, 2400, '-', 'rrnL')]
+        self.assertEqual(v.gene_counts(v.collapse_parts(feats))['trnL'], 2)
 
 
 class TestBlastStats(unittest.TestCase):
