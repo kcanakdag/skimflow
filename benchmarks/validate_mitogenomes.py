@@ -61,7 +61,7 @@ def norm_gene(name):
         return None
     n = name.strip()
     n = re.sub(r'\(.*?\)$', '', n)        # MITOS anticodon: trnL1(tag)
-    n = re.sub(r'-[a-z]$', '', n)         # MITOS split parts: cox1-a
+    n = re.sub(r'(-[a-z]|_\d+)$', '', n)  # MITOS split parts: cox1-a, nad4_0
     low = n.lower()
     m = re.fullmatch(r'trn([a-z])[12]?', low)
     if m:
@@ -273,7 +273,8 @@ def run_blast(blastn, query, subject):
     fmt = '6 qseqid pident length qstart qend sstart send bitscore evalue'
     cmd = shlex.split(blastn) + ['-query', query, '-subject', subject,
                                  '-outfmt', fmt, '-evalue', '1e-10']
-    out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
+    out = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         universal_newlines=True).stdout   # Python 3.6 has no capture_output
     hsps = []
     for line in out.splitlines():
         c = line.split('\t')

@@ -11,7 +11,7 @@ class TestNormGene(unittest.TestCase):
     def test_names(self):
         cases = {
             'ND4L': 'nad4l', 'NAD1': 'nad1', 'CYTB': 'cob', 'COX1': 'cox1',
-            'cox1-a': 'cox1', 'trnL1(tag)': 'trnL', 'trnS2': 'trnS',
+            'cox1-a': 'cox1', 'nad4_0': 'nad4', 'nad2_1': 'nad2', 'trnL1(tag)': 'trnL', 'trnS2': 'trnS',
             'tRNA-Leu': 'trnL', '16S ribosomal RNA': 'rrnL', 'l-rRNA': 'rrnL',
             's-rRNA': 'rrnS', 'cytochrome c oxidase subunit I': 'cox1',
             'NADH dehydrogenase subunit 4L': 'nad4l',

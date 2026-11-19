@@ -33,9 +33,9 @@
 # titration.csv records both the requested and the achieved coverage (parsed
 # from rasusa's log). A failed level is reported as a WARN and skipped.
 #
-# Thesis input: the first 1,000,000 read pairs (taken with head, so no seed) of
-# the Bleidorn lab's Proceraea misakiensis (Pmisa) skim files
-# Pmisa_R{1,2}.cleaned.fastq.gz, run with --genome-size 1200000000. These reads
+# Thesis input: all reads of the Bleidorn lab's Megasyllis nipponica skim,
+# run with --genome-size 634000000 (the RESPECT estimate from all reads),
+# levels 0.05,0.1,0.25,0.5,1,2,5 and --seeds 3. These reads
 # are not public and are not part of the repo.
 set -euo pipefail
 
@@ -129,7 +129,7 @@ IFS=',' read -r -a COV_LIST <<< "$COVERAGES"
 
 for cov in "${COV_LIST[@]}"; do
     for seed in $(seq 1 "$SEEDS"); do
-        run_id="${SAMPLE_ID}_c${cov}_s${seed}"
+        run_id="${SAMPLE_ID}_c${cov//./p}_s${seed}"   # sample ids may not contain dots
         run_dir="$OUTDIR/$run_id"
         mkdir -p "$run_dir"
         sub_r1="$run_dir/${run_id}_R1.fastq.gz"
