@@ -320,6 +320,23 @@ else
     log "RESPECT image cached: $RESPECT_SIF"
 fi
 
+# --- Infernal 1.0.2 cmsearch for MitoZ ----------------------------------
+# MiTFi (MitoZ's tRNA finder) ships a static 2009 cmsearch that segfaults
+# under Apptainer on GWDG; conf/gwdg.config mounts this Bioconda build of the
+# same version over it. Downloaded once, checked against a fixed checksum.
+CMSEARCH="$APPTAINER_CACHEDIR/infernal-1.0.2_cmsearch"
+CMSEARCH_SHA=cf4c88a7b489ae39c6b62b7001ac4ecd125e64bcdf80d7909c980455d13c0def
+if [[ ! -x "$CMSEARCH" ]]; then
+    log "fetching Infernal 1.0.2 cmsearch (Bioconda) for MitoZ"
+    tmp=$(mktemp -d)
+    curl -fsSL -o "$tmp/inf.tar.bz2" https://conda.anaconda.org/bioconda/linux-64/infernal-1.0.2-0.tar.bz2
+    tar -xjf "$tmp/inf.tar.bz2" -C "$tmp" bin/cmsearch
+    echo "$CMSEARCH_SHA  $tmp/bin/cmsearch" | sha256sum -c --quiet \
+        || { log "ERROR: cmsearch checksum mismatch"; rm -rf "$tmp"; exit 1; }
+    install -m 755 "$tmp/bin/cmsearch" "$CMSEARCH"
+    rm -rf "$tmp"
+fi
+
 # --- Launch --------------------------------------------------------------
 cd "$REPO_DIR"
 log "launching pipeline"

@@ -64,6 +64,7 @@ process MITOZ_ANNOTATE {
     # podman, where the dir is already first on PATH. Pinned to the mitoz:3.6
     # tag; update alongside params.mitoz_container.
     export PATH="/app/anaconda/envs/mitoz3.6/bin:\$PATH"
+    ${params.mitoz_cmsearch ? "# MiTFi cmsearch replaced by ${params.mitoz_cmsearch} (conf/gwdg.config)" : ''}
 
     topo="${params.mitogenome_topology}"
     case "\$topo" in
